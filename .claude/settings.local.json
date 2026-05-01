@@ -9,7 +9,11 @@
       "Bash(curl -fsS -o /dev/null -w \"%{http_code} \" http://localhost:3000/words)",
       "Bash(curl -fsS -o /dev/null -w \"%{http_code} \" http://localhost:3000/review)",
       "Bash(curl -fsS -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/api/translate/word)",
-      "Bash(curl -fsS -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/api/translate/sentence)"
+      "Bash(curl -fsS -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/api/translate/sentence)",
+      "Bash(curl *)",
+      "Bash(python3 -c \"import sys, json; r=json.load\\(sys.stdin\\); print\\('source:', r['source']\\); print\\('primaryIndex:', r['primaryMeaningIndex']\\); m=r['meanings'][r['primaryMeaningIndex']] if r['meanings'] else None; print\\('primary POS:', m['partOfSpeech'] if m else 'none'\\); print\\('primary def:', m['definitionEn'] if m else 'none'\\); print\\('all POS:', [x['partOfSpeech'] for x in r['meanings']]\\)\")",
+      "Bash(node -e \"const r=require\\('/tmp/t1.json'\\); console.log\\('source:',r.source\\); console.log\\('primaryIndex:',r.primaryMeaningIndex\\); console.log\\('primary POS:',r.meanings[r.primaryMeaningIndex]?.partOfSpeech\\); console.log\\('primary def:',r.meanings[r.primaryMeaningIndex]?.definitionEn\\); console.log\\('primary tr:',r.meanings[r.primaryMeaningIndex]?.definitionTr\\); console.log\\('all POS:',r.meanings.map\\(m=>m.partOfSpeech\\)\\)\")",
+      "Bash(node *)"
     ]
   }
 }

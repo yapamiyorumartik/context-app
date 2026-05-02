@@ -31,3 +31,6 @@ Open <http://localhost:3000>.
 - zustand (client state)
 - lru-cache (in-memory translation cache)
 - lucide-react (icons)
+
+## Status
+Prompts 1-4 complete. Next: Prompt 5 (translation popover).

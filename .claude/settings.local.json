@@ -15,7 +15,8 @@
       "Bash(node -e \"const r=require\\('/tmp/t1.json'\\); console.log\\('source:',r.source\\); console.log\\('primaryIndex:',r.primaryMeaningIndex\\); console.log\\('primary POS:',r.meanings[r.primaryMeaningIndex]?.partOfSpeech\\); console.log\\('primary def:',r.meanings[r.primaryMeaningIndex]?.definitionEn\\); console.log\\('primary tr:',r.meanings[r.primaryMeaningIndex]?.definitionTr\\); console.log\\('all POS:',r.meanings.map\\(m=>m.partOfSpeech\\)\\)\")",
       "Bash(node *)",
       "Bash(netstat -ano)",
-      "Bash(netstat -ano -p tcp)"
+      "Bash(netstat -ano -p tcp)",
+      "Bash(taskkill *)"
     ]
   }
 }

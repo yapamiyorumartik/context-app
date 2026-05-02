@@ -21,8 +21,15 @@ const lora = Lora({
 const TITLE = 'Context — A reading companion for English learners';
 const DESCRIPTION =
   'Read difficult English without breaking your flow. İleri seviye İngilizce metinleri akıcı şekilde okuyun. Free, no signup.';
+const SITE_URL =
+  process.env.NEXT_PUBLIC_SITE_URL ??
+  process.env.VERCEL_PROJECT_PRODUCTION_URL ??
+  'http://localhost:3000';
 
 export const metadata: Metadata = {
+  metadataBase: new URL(
+    SITE_URL.startsWith('http') ? SITE_URL : `https://${SITE_URL}`
+  ),
   title: TITLE,
   description: DESCRIPTION,
   applicationName: 'Context',

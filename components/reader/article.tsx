@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useRef } from 'react';
 
 import { useReaderStore } from '@/lib/reader/store';
+import { useVocabularyStore } from '@/lib/storage/store';
 import { cn } from '@/lib/utils';
 import {
   getSentenceText,
   tokenizeParagraph,
   type Token,
 } from '@/lib/utils/tokenize';
+import type { ReadingFontSize } from '@/types';
 
 interface ArticleProps {
   text: string;
@@ -16,9 +18,18 @@ interface ArticleProps {
   savedLemmas: Set<string>;
 }
 
+const FONT_PX: Record<ReadingFontSize, string> = {
+  sm: '17px',
+  md: '19px',
+  lg: '22px',
+};
+
 export function Article({ text, savedLemmas }: ArticleProps) {
   const articleRef = useRef<HTMLElement>(null);
   const showPopover = useReaderStore((s) => s.showPopover);
+  const fontSize = useVocabularyStore(
+    (s) => s.settings.readingFontSize ?? 'md'
+  );
 
   const paragraphs = useMemo(
     () =>
@@ -85,6 +96,7 @@ export function Article({ text, savedLemmas }: ArticleProps) {
     <article
       ref={articleRef}
       className="mx-auto max-w-[680px] px-4 pb-32 pt-8 sm:px-6"
+      style={{ ['--reader-font-size' as string]: FONT_PX[fontSize] }}
     >
       {paragraphs.map((p, idx) => (
         <Paragraph
@@ -109,8 +121,11 @@ function Paragraph({ text, paragraphIdx, savedLemmas }: ParagraphProps) {
 
   return (
     <p
-      className="font-serif text-[19px] leading-[1.75] text-[#2A2A2A]"
-      style={{ marginBottom: '1.5em' }}
+      className="font-serif leading-[1.75] text-[#2A2A2A]"
+      style={{
+        fontSize: 'var(--reader-font-size, 19px)',
+        marginBottom: '1.5em',
+      }}
     >
       {tokens.map((t, i) => (
         <TokenSpan

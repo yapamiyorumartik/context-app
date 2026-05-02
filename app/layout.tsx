@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Inter, Lora } from 'next/font/google';
 
 import { Header } from '@/components/shared/header';
+import { MotionProvider } from '@/components/shared/motion-provider';
 
 import './globals.css';
 
@@ -17,10 +18,26 @@ const lora = Lora({
   display: 'swap',
 });
 
+const TITLE = 'Context — A reading companion for English learners';
+const DESCRIPTION =
+  'Read difficult English without breaking your flow. İleri seviye İngilizce metinleri akıcı şekilde okuyun. Free, no signup.';
+
 export const metadata: Metadata = {
-  title: 'Context — Read English without breaking flow',
-  description:
-    'A context-aware English reading companion for Turkish B2+ learners. Free, no signup.',
+  title: TITLE,
+  description: DESCRIPTION,
+  applicationName: 'Context',
+  openGraph: {
+    title: TITLE,
+    description: DESCRIPTION,
+    type: 'website',
+    locale: 'en_US',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: TITLE,
+    description: DESCRIPTION,
+  },
+  robots: { index: true, follow: true },
 };
 
 export default function RootLayout({
@@ -31,8 +48,10 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${inter.variable} ${lora.variable}`}>
       <body className="min-h-screen bg-background font-sans text-foreground antialiased">
-        <Header />
-        <main>{children}</main>
+        <MotionProvider>
+          <Header />
+          <main>{children}</main>
+        </MotionProvider>
       </body>
     </html>
   );

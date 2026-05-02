@@ -11,6 +11,7 @@ const NAV = [
   { href: '/read', label: 'Read' },
   { href: '/words', label: 'Words' },
   { href: '/review', label: 'Review' },
+  { href: '/settings', label: 'Settings' },
 ];
 
 function isActive(pathname: string, href: string) {

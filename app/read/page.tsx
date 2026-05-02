@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 
 import { Article } from '@/components/reader/article';
 import { EmptyState } from '@/components/reader/empty';
+import { OnboardingTip } from '@/components/reader/onboarding-tip';
 import { ReadingProgress } from '@/components/reader/progress';
 import { ReaderToast } from '@/components/reader/toast';
 import { ReadingTopBar } from '@/components/reader/top-bar';
@@ -26,7 +27,9 @@ export default function ReadPage() {
   const resetReader = useReaderStore((s) => s.reset);
 
   const vocabulary = useVocabularyStore((s) => s.vocabulary);
+  const settings = useVocabularyStore((s) => s.settings);
   const addSession = useVocabularyStore((s) => s.addSession);
+  const updateSettings = useVocabularyStore((s) => s.updateSettings);
 
   const savedLemmas = useMemo(() => {
     const set = new Set<string>(sessionSavedIds);
@@ -48,6 +51,9 @@ export default function ReadPage() {
     };
     addSession(newSession);
     setSession(newSession);
+    if (!settings.hasSeenOnboarding) {
+      updateSettings({ hasSeenOnboarding: true });
+    }
     if (typeof window !== 'undefined') {
       window.scrollTo({ top: 0 });
     }
@@ -76,6 +82,7 @@ export default function ReadPage() {
     <>
       <ReadingProgress />
       <ReadingTopBar session={session} onExit={handleExit} />
+      <OnboardingTip />
       <Article text={session.text} savedLemmas={savedLemmas} />
       <TranslationPopoverHost />
       <ReaderToast />

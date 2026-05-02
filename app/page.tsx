@@ -1,10 +1,14 @@
 'use client';
 
-import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { BookmarkPlus, MousePointerClick, Sparkles } from 'lucide-react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { useHydratedStore } from '@/hooks/useHydratedStore';
+import { useVocabularyStore } from '@/lib/storage/store';
 
 const FEATURES = [
   {
@@ -30,6 +34,21 @@ const fadeUp = {
 };
 
 export default function LandingPage() {
+  const router = useRouter();
+  const hydrated = useHydratedStore();
+  const hasSeen = useVocabularyStore((s) => s.settings.hasSeenOnboarding);
+
+  // Returning users skip the landing — straight to the dashboard.
+  useEffect(() => {
+    if (hydrated && hasSeen) router.replace('/home');
+  }, [hydrated, hasSeen, router]);
+
+  // While we're checking — or while the redirect is in flight — show
+  // nothing rather than flashing the marketing page.
+  if (!hydrated || hasSeen) {
+    return <div className="min-h-[60vh]" />;
+  }
+
   return (
     <div className="mx-auto max-w-3xl px-6">
       <section className="pb-16 pt-24 sm:pt-32">

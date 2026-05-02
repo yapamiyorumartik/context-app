@@ -155,6 +155,19 @@ export function setCachedTranslation(
   writeTranslationCache(cache);
 }
 
+// ───── Wipe ─────
+
+export function clearAllData(): void {
+  if (!isBrowser()) return;
+  for (const key of Object.values(KEYS)) {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      // ignore quota / private-mode errors
+    }
+  }
+}
+
 // ───── Export / import ─────
 
 interface ExportPayload {

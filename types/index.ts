@@ -55,10 +55,17 @@ export interface ReadingSession {
   wordCount: number;
 }
 
+export type ReadingFontSize = 'sm' | 'md' | 'lg';
+
 export interface AppSettings {
   hasSeenOnboarding: boolean;
+  /** "Tap any word" tip on the reader — separate from landing skip. */
+  hasSeenReaderTip?: boolean;
   reviewStreak: number;
   /** YYYY-MM-DD */
   lastReviewDate?: string;
   totalWordsReviewed: number;
+  /** Date.now() of the most recent successful export. */
+  lastExportedAt?: number;
+  readingFontSize?: ReadingFontSize;
 }

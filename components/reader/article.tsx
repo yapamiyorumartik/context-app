@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 
+import { useReaderStore } from '@/lib/reader/store';
 import { cn } from '@/lib/utils';
 import {
   getSentenceText,
@@ -9,21 +10,16 @@ import {
   type Token,
 } from '@/lib/utils/tokenize';
 
-export interface WordTapInfo {
-  word: string;
-  sentence: string;
-  paragraphIdx: number;
-  sentenceIdx: number;
-}
-
 interface ArticleProps {
   text: string;
   /** Lemmas (lowercase) that should render with a saved-word underline. */
   savedLemmas: Set<string>;
-  onWordClick: (info: WordTapInfo) => void;
 }
 
-export function Article({ text, savedLemmas, onWordClick }: ArticleProps) {
+export function Article({ text, savedLemmas }: ArticleProps) {
+  const articleRef = useRef<HTMLElement>(null);
+  const showPopover = useReaderStore((s) => s.showPopover);
+
   const paragraphs = useMemo(
     () =>
       text
@@ -33,15 +29,69 @@ export function Article({ text, savedLemmas, onWordClick }: ArticleProps) {
     [text]
   );
 
+  // Phrase selection: when the user drag-selects (desktop) or long-presses
+  // to select (mobile) 2+ words inside the article, open the popover with
+  // the selected text as a phrase lookup.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const onSelectionChange = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+
+        const range = sel.getRangeAt(0);
+        const articleEl = articleRef.current;
+        if (!articleEl) return;
+        if (
+          !articleEl.contains(range.startContainer) ||
+          !articleEl.contains(range.endContainer)
+        ) {
+          return;
+        }
+
+        const text = sel.toString().trim();
+        if (!text) return;
+        const words = text.split(/\s+/).filter(Boolean);
+        if (words.length < 2) return;
+
+        const rects = range.getClientRects();
+        const last = rects[rects.length - 1];
+        if (!last) return;
+
+        showPopover({
+          mode: 'phrase',
+          word: text,
+          sentence: text,
+          rect: {
+            top: last.bottom,
+            left: last.right,
+            width: 0,
+            height: 0,
+          },
+        });
+      }, 250);
+    };
+
+    document.addEventListener('selectionchange', onSelectionChange);
+    return () => {
+      document.removeEventListener('selectionchange', onSelectionChange);
+      if (timer) clearTimeout(timer);
+    };
+  }, [showPopover]);
+
   return (
-    <article className="mx-auto max-w-[680px] px-4 pb-32 pt-8 sm:px-6">
+    <article
+      ref={articleRef}
+      className="mx-auto max-w-[680px] px-4 pb-32 pt-8 sm:px-6"
+    >
       {paragraphs.map((p, idx) => (
         <Paragraph
           key={idx}
           text={p}
           paragraphIdx={idx}
           savedLemmas={savedLemmas}
-          onWordClick={onWordClick}
         />
       ))}
     </article>
@@ -52,15 +102,9 @@ interface ParagraphProps {
   text: string;
   paragraphIdx: number;
   savedLemmas: Set<string>;
-  onWordClick: (info: WordTapInfo) => void;
 }
 
-function Paragraph({
-  text,
-  paragraphIdx,
-  savedLemmas,
-  onWordClick,
-}: ParagraphProps) {
+function Paragraph({ text, paragraphIdx, savedLemmas }: ParagraphProps) {
   const tokens = useMemo(() => tokenizeParagraph(text), [text]);
 
   return (
@@ -75,7 +119,6 @@ function Paragraph({
           tokens={tokens}
           paragraphIdx={paragraphIdx}
           savedLemmas={savedLemmas}
-          onWordClick={onWordClick}
         />
       ))}
     </p>
@@ -87,7 +130,6 @@ interface TokenSpanProps {
   tokens: Token[];
   paragraphIdx: number;
   savedLemmas: Set<string>;
-  onWordClick: (info: WordTapInfo) => void;
 }
 
 function TokenSpan({
@@ -95,27 +137,49 @@ function TokenSpan({
   tokens,
   paragraphIdx,
   savedLemmas,
-  onWordClick,
 }: TokenSpanProps) {
+  const showPopover = useReaderStore((s) => s.showPopover);
+  const setSelectedToken = useReaderStore((s) => s.setSelectedToken);
+
   if (token.type !== 'word') {
     return <>{token.text}</>;
   }
 
   const isSaved = savedLemmas.has(token.text.toLowerCase());
 
+  const handleClick = (e: React.MouseEvent<HTMLSpanElement>) => {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.toString().trim().split(/\s+/).length > 1) {
+      // The selection handler already opened a phrase popover — don't override.
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const sentence = getSentenceText(tokens, token.sentenceIdx);
+    setSelectedToken({
+      word: token.text,
+      sentence,
+      paragraphIdx,
+      sentenceIdx: token.sentenceIdx,
+    });
+    showPopover({
+      mode: 'word',
+      word: token.text,
+      sentence,
+      rect: {
+        top: rect.top,
+        left: rect.left,
+        width: rect.width,
+        height: rect.height,
+      },
+    });
+  };
+
   return (
     <span
       data-word={token.text}
       data-sentence-idx={token.sentenceIdx}
       data-paragraph-idx={paragraphIdx}
-      onClick={() =>
-        onWordClick({
-          word: token.text,
-          sentence: getSentenceText(tokens, token.sentenceIdx),
-          paragraphIdx,
-          sentenceIdx: token.sentenceIdx,
-        })
-      }
+      onClick={handleClick}
       className={cn(
         'cursor-pointer rounded-sm px-px py-0.5 transition-colors hover:bg-slate-200/60',
         isSaved &&

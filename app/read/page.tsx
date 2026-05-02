@@ -2,10 +2,12 @@
 
 import { useMemo } from 'react';
 
-import { Article, type WordTapInfo } from '@/components/reader/article';
+import { Article } from '@/components/reader/article';
 import { EmptyState } from '@/components/reader/empty';
 import { ReadingProgress } from '@/components/reader/progress';
+import { ReaderToast } from '@/components/reader/toast';
 import { ReadingTopBar } from '@/components/reader/top-bar';
+import { TranslationPopoverHost } from '@/components/reader/translation-popover';
 import { useHydratedStore } from '@/hooks/useHydratedStore';
 import { useReaderStore } from '@/lib/reader/store';
 import { useVocabularyStore } from '@/lib/storage/store';
@@ -22,7 +24,6 @@ export default function ReadPage() {
   const setSession = useReaderStore((s) => s.setSession);
   const sessionSavedIds = useReaderStore((s) => s.savedWordIds);
   const resetReader = useReaderStore((s) => s.reset);
-  const setSelectedToken = useReaderStore((s) => s.setSelectedToken);
 
   const vocabulary = useVocabularyStore((s) => s.vocabulary);
   const addSession = useVocabularyStore((s) => s.addSession);
@@ -62,26 +63,22 @@ export default function ReadPage() {
     resetReader();
   };
 
-  const handleWordClick = (info: WordTapInfo) => {
-    setSelectedToken(info);
-    // Translation popover lands in the next prompt — log for now.
-    // eslint-disable-next-line no-console
-    console.log('tap:', info);
-  };
-
   if (!session) {
-    return <EmptyState onStart={handleStart} />;
+    return (
+      <>
+        <EmptyState onStart={handleStart} />
+        <ReaderToast />
+      </>
+    );
   }
 
   return (
     <>
       <ReadingProgress />
       <ReadingTopBar session={session} onExit={handleExit} />
-      <Article
-        text={session.text}
-        savedLemmas={savedLemmas}
-        onWordClick={handleWordClick}
-      />
+      <Article text={session.text} savedLemmas={savedLemmas} />
+      <TranslationPopoverHost />
+      <ReaderToast />
     </>
   );
 }

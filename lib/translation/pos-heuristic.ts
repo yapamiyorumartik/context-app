@@ -1,82 +1,93 @@
+import nlp from 'compromise';
+
 import type { PartOfSpeech } from '@/types';
 
 /**
- * Lightweight contextual POS guesser. Pure-function rules, no NLP libs.
- * Returns a confident guess or `null`. Caller should fall back to the
- * dictionary's natural meaning order on null.
+ * Lexicon-based POS tagger via compromise.js.
+ *
+ * Replaces the previous hand-rolled rule set, which mistagged
+ * "the mere thought" → noun (the/a/an before X => noun) and similar
+ * adjective-after-determiner patterns.
+ *
+ * Returns a confident guess or null. On null, the engine falls back to
+ * the dictionary's natural meaning order.
  */
-
-const DETERMINERS = new Set([
-  'the',
-  'a',
-  'an',
-  'his',
-  'her',
-  'this',
-]);
-
-const MODAL_AUX = new Set([
-  'will',
-  'can',
-  'must',
-  'should',
-  'would',
-  'may',
-  'might',
-  'do',
-  'does',
-  'did',
-  'have',
-  'has',
-  'had',
-  'am',
-  'is',
-  'are',
-  'was',
-  'were',
-  'be',
-  'being',
-  'been',
-]);
-
-const INTENSIFIERS = new Set(['very', 'quite', 'really', 'so']);
-
-function tokenize(s: string): string[] {
-  return s.toLowerCase().match(/[a-z']+/g) ?? [];
-}
-
 export function guessWordRole(
   word: string,
   sentence: string
 ): PartOfSpeech | null {
+  if (!word || !sentence) return null;
+
   const target = word.toLowerCase();
-  const tokens = tokenize(sentence);
-  const idx = tokens.indexOf(target);
-  if (idx === -1) return null;
 
-  const prev = idx > 0 ? tokens[idx - 1] : null;
-  const next = idx < tokens.length - 1 ? tokens[idx + 1] : null;
-  const isFirst = idx === 0;
+  let doc;
+  try {
+    doc = nlp(sentence);
+  } catch {
+    return null;
+  }
 
-  // Highest confidence: infinitive marker.
-  if (prev === 'to') return 'verb';
+  const terms = doc.terms().json() as Array<{
+    text?: string;
+    normal?: string;
+    terms?: Array<{ text?: string; normal?: string; tags?: string[] }>;
+    tags?: string[];
+  }>;
 
-  // Determiner / possessive immediately before → noun.
-  if (prev !== null && DETERMINERS.has(prev)) return 'noun';
+  // compromise's .terms().json() shape varies slightly across versions —
+  // flatten defensively so we always end up with { normal, tags } pairs.
+  const flat: Array<{ normal: string; tags: string[] }> = [];
+  for (const t of terms) {
+    if (Array.isArray(t.terms)) {
+      for (const sub of t.terms) {
+        flat.push({
+          normal: (sub.normal ?? sub.text ?? '').toLowerCase(),
+          tags: sub.tags ?? [],
+        });
+      }
+    } else {
+      flat.push({
+        normal: (t.normal ?? t.text ?? '').toLowerCase(),
+        tags: t.tags ?? [],
+      });
+    }
+  }
 
-  // Modal or auxiliary immediately before → main verb.
-  if (prev !== null && MODAL_AUX.has(prev)) return 'verb';
+  const hit = flat.find((t) => t.normal === target);
+  if (!hit) return null;
 
-  // Intensifier immediately before → adjective (most common case).
-  if (prev !== null && INTENSIFIERS.has(prev)) return 'adjective';
+  return mapTags(hit.tags);
+}
 
-  // Imperative pattern: sentence-initial, followed by a determiner-led NP.
-  if (isFirst && next !== null && DETERMINERS.has(next)) return 'verb';
+/**
+ * Map compromise's tag set to our `PartOfSpeech`.
+ *
+ * Order matters: compromise can attach multiple tags to one term
+ * (e.g. ["Verb", "Gerund"]); we pick the first that maps cleanly.
+ */
+function mapTags(tags: string[]): PartOfSpeech | null {
+  const set = new Set(tags);
 
-  // Suffix-based fallback (least confident).
-  if (target.endsWith('ly') && target.length > 3) return 'adverb';
-  if (target.endsWith('ing') && target.length > 4) return 'verb';
-  if (target.endsWith('ed') && target.length > 3) return 'verb';
+  if (set.has('Adverb')) return 'adverb';
+  if (set.has('Adjective')) return 'adjective';
+  if (
+    set.has('Verb') ||
+    set.has('Infinitive') ||
+    set.has('Gerund') ||
+    set.has('PastTense') ||
+    set.has('PresentTense') ||
+    set.has('Participle')
+  ) {
+    return 'verb';
+  }
+  if (
+    set.has('Noun') ||
+    set.has('Singular') ||
+    set.has('Plural') ||
+    set.has('ProperNoun')
+  ) {
+    return 'noun';
+  }
 
   return null;
 }

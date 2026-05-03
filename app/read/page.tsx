@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 
 import { Article } from '@/components/reader/article';
 import { EmptyState } from '@/components/reader/empty';
+import { FullTranslation } from '@/components/reader/full-translation';
 import { OnboardingTip } from '@/components/reader/onboarding-tip';
 import { ReadingProgress } from '@/components/reader/progress';
 import { ReaderToast } from '@/components/reader/toast';
@@ -84,6 +85,7 @@ export default function ReadPage() {
       <ReadingTopBar session={session} onExit={handleExit} />
       <OnboardingTip />
       <Article text={session.text} savedLemmas={savedLemmas} />
+      <FullTranslation text={session.text} />
       <TranslationPopoverHost />
       <ReaderToast />
     </>

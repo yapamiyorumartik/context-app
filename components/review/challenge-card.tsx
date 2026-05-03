@@ -118,12 +118,6 @@ function ChallengeHeader({ challenge }: { challenge: Challenge }) {
           <Sentence text={challenge.sentence} highlight={challenge.word} />
         </div>
       );
-    case 'context_match':
-      return (
-        <Question>
-          Which sentence uses <Em>{challenge.word}</Em> correctly?
-        </Question>
-      );
     case 'fill_blank':
       return (
         <div className="space-y-3">

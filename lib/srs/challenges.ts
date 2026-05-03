@@ -5,7 +5,6 @@ import type { PartOfSpeech, VocabularyEntry } from '@/types';
 
 export type ChallengeType =
   | 'meaning_match'
-  | 'context_match'
   | 'fill_blank'
   | 'reverse_recall';
 
@@ -24,11 +23,6 @@ export interface MeaningMatchChallenge extends BaseChallenge {
   sentence: string;
 }
 
-export interface ContextMatchChallenge extends BaseChallenge {
-  type: 'context_match';
-  word: string;
-}
-
 export interface FillBlankChallenge extends BaseChallenge {
   type: 'fill_blank';
   word: string;
@@ -43,18 +37,18 @@ export interface ReverseRecallChallenge extends BaseChallenge {
 
 export type Challenge =
   | MeaningMatchChallenge
-  | ContextMatchChallenge
   | FillBlankChallenge
   | ReverseRecallChallenge;
 
 // ─── Weights ────────────────────────────────────────────────────────────────
 
-// $0 MVP: NUANCE_CHECK + REWRITE_PROMPT skipped (need an LLM).
+// `context_match` retired — its distractors were sentences from unrelated
+// vocabulary entries (none of which contained the target word), making the
+// answer trivial and the question unteaching. Weight redistributed.
 const WEIGHTS: Record<ChallengeType, number> = {
-  meaning_match: 45,
-  context_match: 20,
-  fill_blank: 15,
-  reverse_recall: 20,
+  meaning_match: 55,
+  fill_blank: 20,
+  reverse_recall: 25,
 };
 
 const MULTI_WORD_MIN_POOL = 4;
@@ -113,7 +107,7 @@ function newId(): string {
 /** Soft-prefer not repeating a type already used in this session. */
 function pickType(canUseMulti: boolean, used: ChallengeType[]): ChallengeType {
   const available: ChallengeType[] = canUseMulti
-    ? ['meaning_match', 'context_match', 'fill_blank', 'reverse_recall']
+    ? ['meaning_match', 'fill_blank', 'reverse_recall']
     : ['meaning_match'];
 
   const weights = available.map((t) => {
@@ -161,28 +155,6 @@ function generateMeaningMatch(
     entry,
     word: entry.word,
     sentence: entry.contextSentence,
-    options,
-    correctIndex: options.indexOf(correct),
-  };
-}
-
-function generateContextMatch(
-  entry: VocabularyEntry,
-  pool: readonly VocabularyEntry[]
-): ContextMatchChallenge {
-  const correct = entry.contextSentence;
-  const seen = new Set<string>([correct]);
-  const otherSentences = shuffle(
-    pool.filter((v) => v.id !== entry.id).map((v) => v.contextSentence)
-  );
-  const distractors = takeUnique(otherSentences, 2, seen, (s) => s);
-
-  const options = shuffle([correct, ...distractors]);
-  return {
-    id: newId(),
-    type: 'context_match',
-    entry,
-    word: entry.word,
     options,
     correctIndex: options.indexOf(correct),
   };
@@ -272,8 +244,6 @@ export function buildChallenges(
     switch (type) {
       case 'meaning_match':
         return generateMeaningMatch(entry, pool);
-      case 'context_match':
-        return generateContextMatch(entry, pool);
       case 'fill_blank':
         return generateFillBlank(entry, pool);
       case 'reverse_recall':

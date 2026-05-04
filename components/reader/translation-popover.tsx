@@ -106,6 +106,28 @@ function PopoverBody({ data, onClose }: PopoverBodyProps) {
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>(
     'idle'
   );
+  const [sentenceTr, setSentenceTr] = useState<string | null>(null);
+
+  // Fetch contextual sentence translation in parallel — gives the user
+  // the word's actual in-context meaning regardless of Lesk's dictionary pick.
+  useEffect(() => {
+    if (data.mode !== 'word' || !data.sentence) return;
+    setSentenceTr(null);
+    const controller = new AbortController();
+    fetch('/api/translate/sentence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sentence: data.sentence }),
+      signal: controller.signal,
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { translation?: string } | null) => {
+        const tr = j?.translation?.trim();
+        if (tr) setSentenceTr(tr);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [data.word, data.sentence, data.mode, retry]);
 
   // Fetch translation (skip if word already saved — we have it locally).
   useEffect(() => {
@@ -264,6 +286,7 @@ function PopoverBody({ data, onClose }: PopoverBodyProps) {
     return (
       <SavedView
         entry={existingEntry}
+        sentenceTr={sentenceTr}
         onSpeak={handleSpeak}
         onRemove={handleRemove}
         onClose={onClose}
@@ -315,6 +338,7 @@ function PopoverBody({ data, onClose }: PopoverBodyProps) {
       onSave={handleSave}
       onSpeak={handleSpeak}
       onClose={onClose}
+      sentenceTr={sentenceTr}
     />
   );
 }
@@ -417,6 +441,7 @@ interface DataViewProps {
   onSave: () => void;
   onSpeak: () => void;
   onClose: () => void;
+  sentenceTr?: string | null;
 }
 
 function DataView({
@@ -428,13 +453,12 @@ function DataView({
   onSave,
   onSpeak,
   onClose,
+  sentenceTr,
 }: DataViewProps) {
   const primary = result.meanings[selectedIdx] ?? result.meanings[0];
   const others = result.meanings
     .map((m, i) => ({ m, i }))
     .filter(({ i }) => i !== selectedIdx);
-  // Collapsed by default — most users only need the context-best meaning.
-  // The toggle is there for the rare case Lesk picked the wrong sense.
   const [showAlternates, setShowAlternates] = useState(false);
 
   return (
@@ -448,6 +472,16 @@ function DataView({
       <div className="my-3 h-px bg-border/60" />
 
       <div className="overflow-y-auto pr-1">
+        {sentenceTr && data.mode === 'word' ? (
+          <div className="mb-3 rounded-md bg-muted/40 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
+              Bu cümlede
+            </div>
+            <p className="mt-0.5 text-sm leading-relaxed text-foreground">
+              {sentenceTr}
+            </p>
+          </div>
+        ) : null}
         <PrimaryMeaning meaning={primary} />
 
         {others.length > 0 ? (
@@ -565,11 +599,13 @@ function AlternateMeaning({
 
 function SavedView({
   entry,
+  sentenceTr,
   onSpeak,
   onRemove,
   onClose,
 }: {
   entry: VocabularyEntry;
+  sentenceTr?: string | null;
   onSpeak: () => void;
   onRemove: () => void;
   onClose: () => void;
@@ -584,6 +620,16 @@ function SavedView({
       />
       <div className="h-px bg-border/60" />
 
+      {sentenceTr ? (
+        <div className="rounded-md bg-muted/40 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
+            Bu cümlede
+          </div>
+          <p className="mt-0.5 text-sm leading-relaxed text-foreground">
+            {sentenceTr}
+          </p>
+        </div>
+      ) : null}
       <PrimaryMeaning meaning={entry.selectedMeaning} />
 
       <div className="text-[11px] text-muted-foreground">

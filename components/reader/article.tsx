@@ -12,10 +12,18 @@ import {
 } from '@/lib/utils/tokenize';
 import type { ReadingFontSize } from '@/types';
 
+/**
+ * Per-saved-word state used for color-coded underlines in the reader.
+ * - `saved`: in user's vocabulary, not yet due for review
+ * - `due`:   `nextReviewAt` has passed — gentle nudge to notice it again
+ * - `overdue`: due > 3 days ago — stronger visual cue
+ */
+export type SavedLemmaState = 'saved' | 'due' | 'overdue';
+
 interface ArticleProps {
   text: string;
-  /** Lemmas (lowercase) that should render with a saved-word underline. */
-  savedLemmas: Set<string>;
+  /** Lemmas (lowercase) → underline state. Lemmas not in the map render plain. */
+  savedLemmas: ReadonlyMap<string, SavedLemmaState>;
 }
 
 const FONT_PX: Record<ReadingFontSize, string> = {
@@ -113,7 +121,7 @@ export function Article({ text, savedLemmas }: ArticleProps) {
 interface ParagraphProps {
   text: string;
   paragraphIdx: number;
-  savedLemmas: Set<string>;
+  savedLemmas: ReadonlyMap<string, SavedLemmaState>;
 }
 
 function Paragraph({ text, paragraphIdx, savedLemmas }: ParagraphProps) {
@@ -144,8 +152,23 @@ interface TokenSpanProps {
   token: Token;
   tokens: Token[];
   paragraphIdx: number;
-  savedLemmas: Set<string>;
+  savedLemmas: ReadonlyMap<string, SavedLemmaState>;
 }
+
+const SAVED_UNDERLINE_CLASS: Record<SavedLemmaState, string> = {
+  saved:
+    'underline decoration-dotted decoration-gray-300 underline-offset-4',
+  due:
+    'underline decoration-dotted decoration-amber-500/80 underline-offset-4',
+  overdue:
+    'underline decoration-dotted decoration-rose-500/90 underline-offset-4',
+};
+
+const SAVED_LABEL: Record<SavedLemmaState, string> = {
+  saved: 'Kaydedildi',
+  due: 'Tekrar zamanı',
+  overdue: 'Gecikmiş tekrar',
+};
 
 function TokenSpan({
   token,
@@ -160,7 +183,7 @@ function TokenSpan({
     return <>{token.text}</>;
   }
 
-  const isSaved = savedLemmas.has(token.text.toLowerCase());
+  const savedState = savedLemmas.get(token.text.toLowerCase());
 
   const handleClick = (e: React.MouseEvent<HTMLSpanElement>) => {
     const sel = window.getSelection();
@@ -195,10 +218,10 @@ function TokenSpan({
       data-sentence-idx={token.sentenceIdx}
       data-paragraph-idx={paragraphIdx}
       onClick={handleClick}
+      title={savedState ? SAVED_LABEL[savedState] : undefined}
       className={cn(
         'cursor-pointer rounded-sm px-px py-0.5 transition-colors hover:bg-slate-200/60',
-        isSaved &&
-          'underline decoration-dotted decoration-gray-300 underline-offset-4'
+        savedState && SAVED_UNDERLINE_CLASS[savedState]
       )}
     >
       {token.text}

@@ -124,7 +124,7 @@ export function ReviewComplete({
         </motion.div>
 
         <p className="mt-6 text-[11px] text-muted-foreground/80">
-          No guilt. No "come back tomorrow."
+          No guilt. No &ldquo;come back tomorrow.&rdquo;
         </p>
       </div>
 

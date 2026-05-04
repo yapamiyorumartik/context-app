@@ -1,9 +1,10 @@
 'use client';
 
-import * as Popover from '@radix-ui/react-popover';
+import { motion } from 'framer-motion';
 import {
   Check,
   ChevronDown,
+  GripHorizontal,
   Plus,
   RotateCcw,
   Star,
@@ -16,6 +17,7 @@ import {
   useMemo,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 
 import {
   useReaderStore,
@@ -27,57 +29,62 @@ import { cn } from '@/lib/utils';
 import { relativeTime } from '@/lib/utils/relative-time';
 import type { VocabularyEntry, WordMeaning } from '@/types';
 
-/** Top-level host: renders one Radix Popover, anchored to the latest click rect. */
+const POPOVER_W = 328;
+
 export function TranslationPopoverHost() {
   const active = useReaderStore((s) => s.activePopover);
   const hide = useReaderStore((s) => s.hidePopover);
 
-  return (
-    <Popover.Root
-      open={!!active}
-      modal={false}
-      onOpenChange={(o) => {
-        if (!o) hide();
-      }}
-    >
-      {active ? (
-        <Popover.Anchor asChild>
-          <span
-            aria-hidden="true"
-            className="pointer-events-none fixed"
-            style={{
-              top: active.rect.top,
-              left: active.rect.left,
-              width: active.rect.width,
-              height: active.rect.height,
-            }}
-          />
-        </Popover.Anchor>
-      ) : null}
+  if (!active || typeof window === 'undefined') return null;
 
-      <Popover.Portal>
-        <Popover.Content
-          side="bottom"
-          align="center"
-          sideOffset={8}
-          collisionPadding={12}
-          avoidCollisions
-          className="z-50 w-[320px] max-w-[calc(100vw-16px)] rounded-lg border border-border bg-popover p-4 text-popover-foreground shadow-lg outline-none"
-        >
-          {active ? (
-            <PopoverBody
-              key={`${active.mode}::${active.word}::${active.sentence}`}
-              data={active}
-              onClose={hide}
-            />
-          ) : null}
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+  // Position below the clicked word, clamped to viewport.
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const initialX = Math.max(8, Math.min(active.rect.left, vw - POPOVER_W - 8));
+  const initialY = Math.min(active.rect.bottom + 8, vh - 240);
+
+  return createPortal(
+    <>
+      <div
+        className="fixed inset-0 z-40"
+        aria-hidden
+        onClick={hide}
+      />
+      <motion.div
+        key={`${active.word}::${active.sentence}`}
+        drag
+        dragMomentum={false}
+        dragElastic={0}
+        initial={{ x: initialX, y: initialY, opacity: 0, scale: 0.96 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.14, ease: 'easeOut' }}
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: POPOVER_W,
+          zIndex: 50,
+          maxHeight: '80vh',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+        className="overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-lg"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Drag handle */}
+        <div className="flex cursor-grab items-center justify-center py-1.5 active:cursor-grabbing">
+          <GripHorizontal className="h-4 w-4 text-muted-foreground/40" />
+        </div>
+        <div className="overflow-y-auto px-4 pb-4">
+          <PopoverBody data={active} onClose={hide} />
+        </div>
+      </motion.div>
+    </>,
+    document.body
   );
 }
 
-// ─── Popover body ────────────────────────────────────────────────────────────
+// ─── Popover body ─────────────────────────────────────────────────────────────
 
 interface PopoverBodyProps {
   data: ActivePopover;
@@ -103,13 +110,10 @@ function PopoverBody({ data, onClose }: PopoverBodyProps) {
   const [error, setError] = useState(false);
   const [retry, setRetry] = useState(0);
   const [selectedIdx, setSelectedIdx] = useState(0);
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>(
-    'idle'
-  );
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [sentenceTr, setSentenceTr] = useState<string | null>(null);
 
-  // Fetch contextual sentence translation in parallel — gives the user
-  // the word's actual in-context meaning regardless of Lesk's dictionary pick.
+  // Sentence-level contextual translation (parallel, for display + auto-select).
   useEffect(() => {
     if (data.mode !== 'word' || !data.sentence) return;
     setSentenceTr(null);
@@ -129,19 +133,33 @@ function PopoverBody({ data, onClose }: PopoverBodyProps) {
     return () => controller.abort();
   }, [data.word, data.sentence, data.mode, retry]);
 
-  // Fetch translation (skip if word already saved — we have it locally).
+  // Auto-select best meaning using Turkish sentence overlap.
+  // Runs after both sentenceTr and result are loaded.
+  useEffect(() => {
+    if (!sentenceTr || !result || result.meanings.length <= 1) return;
+    const sBag = trBag(sentenceTr);
+    let bestIdx = 0;
+    let bestScore = -1;
+    result.meanings.forEach((m, i) => {
+      const mBag = trBag(m.definitionTr || m.definitionEn);
+      let score = 0;
+      for (const w of mBag) if (sBag.has(w)) score++;
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = i;
+      }
+    });
+    if (bestScore > 0) setSelectedIdx(bestIdx);
+  }, [sentenceTr, result]);
+
+  // Fetch word/phrase translation.
   useEffect(() => {
     if (existingEntry) return;
     const controller = new AbortController();
-
-    const url =
-      data.mode === 'phrase'
-        ? '/api/translate/sentence'
-        : '/api/translate/word';
-    const body =
-      data.mode === 'phrase'
-        ? { sentence: data.word }
-        : { word: data.word, sentence: data.sentence };
+    const url = data.mode === 'phrase' ? '/api/translate/sentence' : '/api/translate/word';
+    const body = data.mode === 'phrase'
+      ? { sentence: data.word }
+      : { word: data.word, sentence: data.sentence };
 
     setResult(null);
     setError(false);
@@ -152,23 +170,13 @@ function PopoverBody({ data, onClose }: PopoverBodyProps) {
       body: JSON.stringify(body),
       signal: controller.signal,
     })
-      .then((r) =>
-        r.ok ? r.json() : Promise.reject(new Error(`status ${r.status}`))
-      )
+      .then((r) => r.ok ? r.json() : Promise.reject(new Error(`status ${r.status}`)))
       .then((json) => {
         if (data.mode === 'phrase') {
           const tr = (json as { translation?: string }).translation ?? '';
           setResult({
             word: data.word,
-            meanings: tr
-              ? [
-                  {
-                    partOfSpeech: 'phrase',
-                    definitionEn: data.word,
-                    definitionTr: tr,
-                  },
-                ]
-              : [],
+            meanings: tr ? [{ partOfSpeech: 'phrase', definitionEn: data.word, definitionTr: tr }] : [],
             primaryMeaningIndex: 0,
             source: 'translate',
           });
@@ -188,29 +196,25 @@ function PopoverBody({ data, onClose }: PopoverBodyProps) {
   }, [data.word, data.sentence, data.mode, retry, existingEntry]);
 
   const handleSpeak = useCallback(() => {
-    if (typeof window === 'undefined') return;
-    if (!('speechSynthesis' in window)) return;
-    const utterance = new SpeechSynthesisUtterance(data.word);
-    utterance.lang = 'en-US';
-    utterance.rate = 0.9;
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    const u = new SpeechSynthesisUtterance(data.word);
+    u.lang = 'en-US';
+    u.rate = 0.9;
     window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
+    window.speechSynthesis.speak(u);
   }, [data.word]);
 
   const handleRemove = useCallback(() => {
     if (!existingEntry) return;
-    const snapshot = existingEntry;
-    removeWord(snapshot.id);
-    showToast('Removed', { onUndo: () => addWord(snapshot) });
+    const snap = existingEntry;
+    removeWord(snap.id);
+    showToast('Removed', { onUndo: () => addWord(snap) });
     onClose();
   }, [existingEntry, removeWord, addWord, showToast, onClose]);
 
   const handleSave = useCallback(() => {
     if (saveState !== 'idle') return;
-    if (existingEntry) {
-      handleRemove();
-      return;
-    }
+    if (existingEntry) { handleRemove(); return; }
     if (!result || result.meanings.length === 0) return;
 
     const meaning = result.meanings[selectedIdx] ?? result.meanings[0];
@@ -232,10 +236,8 @@ function PopoverBody({ data, onClose }: PopoverBodyProps) {
     };
 
     setSaveState('saving');
-    // Optimistic underline immediately.
     addSavedWordId(entry.lemma);
     addWord(entry);
-
     window.setTimeout(() => {
       setSaveState('saved');
       window.setTimeout(() => {
@@ -243,35 +245,16 @@ function PopoverBody({ data, onClose }: PopoverBodyProps) {
         onClose();
       }, 600);
     }, 50);
-  }, [
-    saveState,
-    existingEntry,
-    handleRemove,
-    result,
-    selectedIdx,
-    data.word,
-    data.sentence,
-    sessionId,
-    addSavedWordId,
-    addWord,
-    removeWord,
-    showToast,
-    onClose,
-  ]);
+  }, [saveState, existingEntry, handleRemove, result, selectedIdx, data.word, data.sentence, sessionId, addSavedWordId, addWord, removeWord, showToast, onClose]);
 
-  // Keyboard shortcuts: 1-4 select meaning, S save.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (saveState !== 'idle') return;
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
-
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
       if (/^[1-4]$/.test(e.key)) {
         const i = parseInt(e.key, 10) - 1;
-        if (result && i < result.meanings.length) {
-          e.preventDefault();
-          setSelectedIdx(i);
-        }
+        if (result && i < result.meanings.length) { e.preventDefault(); setSelectedIdx(i); }
       } else if (e.key === 's' || e.key === 'S') {
         e.preventDefault();
         handleSave();
@@ -281,7 +264,6 @@ function PopoverBody({ data, onClose }: PopoverBodyProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [result, saveState, handleSave]);
 
-  // ─ Already-saved view ─
   if (existingEntry) {
     return (
       <SavedView
@@ -294,40 +276,28 @@ function PopoverBody({ data, onClose }: PopoverBodyProps) {
     );
   }
 
-  // ─ Error view ─
   if (error) {
     return (
       <ErrorView
         word={data.word}
-        onRetry={() => {
-          setError(false);
-          setRetry((n) => n + 1);
-        }}
+        onRetry={() => { setError(false); setRetry((n) => n + 1); }}
         onClose={onClose}
       />
     );
   }
 
-  // ─ Skeleton view ─
-  if (!result) {
-    return <SkeletonView word={data.word} onClose={onClose} />;
-  }
+  if (!result) return <SkeletonView word={data.word} onClose={onClose} />;
 
-  // ─ Empty result (dictionary returned nothing usable) ─
   if (result.meanings.length === 0) {
     return (
       <ErrorView
         word={data.word}
-        onRetry={() => {
-          setError(false);
-          setRetry((n) => n + 1);
-        }}
+        onRetry={() => { setError(false); setRetry((n) => n + 1); }}
         onClose={onClose}
       />
     );
   }
 
-  // ─ Data view ─
   return (
     <DataView
       data={data}
@@ -343,7 +313,7 @@ function PopoverBody({ data, onClose }: PopoverBodyProps) {
   );
 }
 
-// ─── Sub-views ───────────────────────────────────────────────────────────────
+// ─── Sub-views ────────────────────────────────────────────────────────────────
 
 function PopoverHeader({
   word,
@@ -394,31 +364,16 @@ function SkeletonView({ word, onClose }: { word: string; onClose: () => void }) 
         <div className="h-5 w-2/3 animate-pulse rounded bg-slate-200" />
         <div className="h-3 w-5/6 animate-pulse rounded bg-slate-200/70" />
       </div>
-      <div className="space-y-2 pt-1">
-        <div className="h-3 w-1/3 animate-pulse rounded bg-slate-200/70" />
-        <div className="h-4 w-3/5 animate-pulse rounded bg-slate-200" />
-        <div className="h-4 w-2/5 animate-pulse rounded bg-slate-200" />
-      </div>
     </div>
   );
 }
 
-function ErrorView({
-  word,
-  onRetry,
-  onClose,
-}: {
-  word: string;
-  onRetry: () => void;
-  onClose: () => void;
-}) {
+function ErrorView({ word, onRetry, onClose }: { word: string; onRetry: () => void; onClose: () => void }) {
   return (
     <div className="space-y-3">
       <PopoverHeader word={word} onClose={onClose} />
       <div className="h-px bg-border/60" />
-      <p className="text-sm text-muted-foreground">
-        Bu kelimenin anlamı yüklenemedi.
-      </p>
+      <p className="text-sm text-muted-foreground">Bu kelimenin anlamı yüklenemedi.</p>
       <div className="flex justify-end">
         <button
           type="button"
@@ -444,25 +399,13 @@ interface DataViewProps {
   sentenceTr?: string | null;
 }
 
-function DataView({
-  data,
-  result,
-  selectedIdx,
-  onSelect,
-  saveState,
-  onSave,
-  onSpeak,
-  onClose,
-  sentenceTr,
-}: DataViewProps) {
+function DataView({ data, result, selectedIdx, onSelect, saveState, onSave, onSpeak, onClose, sentenceTr }: DataViewProps) {
   const primary = result.meanings[selectedIdx] ?? result.meanings[0];
-  const others = result.meanings
-    .map((m, i) => ({ m, i }))
-    .filter(({ i }) => i !== selectedIdx);
+  const others = result.meanings.map((m, i) => ({ m, i })).filter(({ i }) => i !== selectedIdx);
   const [showAlternates, setShowAlternates] = useState(false);
 
   return (
-    <div className="flex max-h-[70vh] flex-col">
+    <div className="flex flex-col gap-0">
       <PopoverHeader
         word={data.mode === 'phrase' ? 'Phrase' : data.word}
         badge={primary.partOfSpeech}
@@ -471,101 +414,74 @@ function DataView({
       />
       <div className="my-3 h-px bg-border/60" />
 
-      <div className="overflow-y-auto pr-1">
-        {sentenceTr && data.mode === 'word' ? (
-          <div className="mb-3 rounded-md bg-muted/40 px-3 py-2">
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
-              Bu cümlede
-            </div>
-            <p className="mt-0.5 text-sm leading-relaxed text-foreground">
-              {sentenceTr}
-            </p>
-          </div>
-        ) : null}
-        <PrimaryMeaning meaning={primary} />
+      {sentenceTr && data.mode === 'word' ? (
+        <div className="mb-3 rounded-md bg-muted/40 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Bu cümlede</div>
+          <p className="mt-0.5 text-sm leading-relaxed text-foreground">{sentenceTr}</p>
+        </div>
+      ) : null}
 
-        {others.length > 0 ? (
-          <div className="mt-3">
-            <button
-              type="button"
-              onClick={() => setShowAlternates((v) => !v)}
-              className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground/70 transition-colors hover:text-foreground"
-              aria-expanded={showAlternates}
-            >
-              <ChevronDown
-                className={cn(
-                  'h-3 w-3 transition-transform',
-                  showAlternates ? 'rotate-180' : ''
-                )}
-              />
-              {showAlternates ? 'Gizle' : `${others.length} diğer anlam`}
-            </button>
+      <PrimaryMeaning meaning={primary} word={data.mode === 'word' ? data.word : undefined} />
 
-            {showAlternates ? (
-              <ul className="mt-2 space-y-2">
-                {others.map(({ m, i }) => (
-                  <li key={i}>
-                    <AlternateMeaning
-                      meaning={m}
-                      onClick={() => onSelect(i)}
-                      shortcut={i < 4 ? String(i + 1) : undefined}
-                    />
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
+      {others.length > 0 ? (
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={() => setShowAlternates((v) => !v)}
+            className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground/70 transition-colors hover:text-foreground"
+            aria-expanded={showAlternates}
+          >
+            <ChevronDown className={cn('h-3 w-3 transition-transform', showAlternates ? 'rotate-180' : '')} />
+            {showAlternates ? 'Gizle' : `${others.length} diğer anlam`}
+          </button>
+          {showAlternates ? (
+            <ul className="mt-2 space-y-2">
+              {others.map(({ m, i }) => (
+                <li key={i}>
+                  <AlternateMeaning meaning={m} onClick={() => onSelect(i)} shortcut={i < 4 ? String(i + 1) : undefined} />
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="mt-3 flex items-center justify-between gap-2 border-t border-border/60 pt-3">
         <SaveButton state={saveState} onClick={onSave} />
-        <div className="flex items-center gap-1">
-          <IconButton ariaLabel="Pronounce" onClick={onSpeak}>
-            <Volume2 className="h-4 w-4" />
-          </IconButton>
-        </div>
+        <IconButton ariaLabel="Pronounce" onClick={onSpeak}>
+          <Volume2 className="h-4 w-4" />
+        </IconButton>
       </div>
     </div>
   );
 }
 
-function PrimaryMeaning({ meaning }: { meaning: WordMeaning }) {
+function PrimaryMeaning({ meaning, word }: { meaning: WordMeaning; word?: string }) {
   const tr = meaning.definitionTr || meaning.definitionEn;
   return (
-    <div>
-      <div className="flex items-start gap-2">
-        <Star
-          className="mt-1 h-4 w-4 shrink-0 fill-amber-300 text-amber-400"
-          aria-hidden="true"
-        />
-        <div className="min-w-0">
-          <div className="font-serif text-lg leading-snug text-foreground">
-            {tr}
-          </div>
-          <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            “{meaning.definitionEn}”
-          </div>
-          {meaning.example ? (
-            <div className="mt-1 text-xs italic leading-relaxed text-muted-foreground/80">
-              {meaning.example}
-            </div>
+    <div className="flex items-start gap-2">
+      <Star className="mt-1 h-4 w-4 shrink-0 fill-amber-300 text-amber-400" aria-hidden />
+      <div className="min-w-0">
+        <div className="font-serif text-lg font-semibold leading-snug text-foreground">
+          {tr}
+          {word ? (
+            <span className="ml-2 text-sm font-normal text-muted-foreground">({word})</span>
           ) : null}
         </div>
+        <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          &ldquo;{meaning.definitionEn}&rdquo;
+        </div>
+        {meaning.example ? (
+          <div className="mt-1 text-xs italic leading-relaxed text-muted-foreground/80">
+            {meaning.example}
+          </div>
+        ) : null}
       </div>
     </div>
   );
 }
 
-function AlternateMeaning({
-  meaning,
-  onClick,
-  shortcut,
-}: {
-  meaning: WordMeaning;
-  onClick: () => void;
-  shortcut?: string;
-}) {
+function AlternateMeaning({ meaning, onClick, shortcut }: { meaning: WordMeaning; onClick: () => void; shortcut?: string }) {
   const tr = meaning.definitionTr || meaning.definitionEn;
   return (
     <button
@@ -573,19 +489,14 @@ function AlternateMeaning({
       onClick={onClick}
       className="group flex w-full items-start gap-2 rounded-md p-1.5 text-left transition-colors hover:bg-accent"
     >
-      <span
-        aria-hidden="true"
-        className="mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full border border-muted-foreground/40 transition-colors group-hover:border-foreground"
-      />
+      <span className="mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full border border-muted-foreground/40 group-hover:border-foreground" aria-hidden />
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline justify-between gap-2">
           <span className="truncate text-sm text-foreground">{tr}</span>
-          <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
-            {meaning.partOfSpeech}
-          </span>
+          <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">{meaning.partOfSpeech}</span>
         </span>
         <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-          “{meaning.definitionEn}”
+          &ldquo;{meaning.definitionEn}&rdquo;
         </span>
       </span>
       {shortcut ? (
@@ -619,23 +530,14 @@ function SavedView({
         onClose={onClose}
       />
       <div className="h-px bg-border/60" />
-
       {sentenceTr ? (
         <div className="rounded-md bg-muted/40 px-3 py-2">
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
-            Bu cümlede
-          </div>
-          <p className="mt-0.5 text-sm leading-relaxed text-foreground">
-            {sentenceTr}
-          </p>
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Bu cümlede</div>
+          <p className="mt-0.5 text-sm leading-relaxed text-foreground">{sentenceTr}</p>
         </div>
       ) : null}
-      <PrimaryMeaning meaning={entry.selectedMeaning} />
-
-      <div className="text-[11px] text-muted-foreground">
-        Saved {relativeTime(entry.createdAt)}
-      </div>
-
+      <PrimaryMeaning meaning={entry.selectedMeaning} word={entry.word} />
+      <div className="text-[11px] text-muted-foreground">Saved {relativeTime(entry.createdAt)}</div>
       <div className="flex items-center justify-between gap-2 border-t border-border/60 pt-3">
         <button
           type="button"
@@ -653,15 +555,7 @@ function SavedView({
   );
 }
 
-// ─── Tiny shared bits ────────────────────────────────────────────────────────
-
-function SaveButton({
-  state,
-  onClick,
-}: {
-  state: 'idle' | 'saving' | 'saved';
-  onClick: () => void;
-}) {
+function SaveButton({ state, onClick }: { state: 'idle' | 'saving' | 'saved'; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -674,35 +568,14 @@ function SaveButton({
           : 'bg-foreground text-background hover:bg-foreground/90 disabled:opacity-70'
       )}
     >
-      {state === 'idle' ? (
-        <>
-          <Plus className="h-3.5 w-3.5" />
-          Save
-        </>
-      ) : state === 'saving' ? (
-        <>
-          <span className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-background/40 border-t-background" />
-          Saving
-        </>
-      ) : (
-        <>
-          <Check className="h-3.5 w-3.5" />
-          Saved
-        </>
-      )}
+      {state === 'idle' ? <><Plus className="h-3.5 w-3.5" />Save</>
+        : state === 'saving' ? <><span className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-background/40 border-t-background" />Saving</>
+        : <><Check className="h-3.5 w-3.5" />Saved</>}
     </button>
   );
 }
 
-function IconButton({
-  ariaLabel,
-  onClick,
-  children,
-}: {
-  ariaLabel: string;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
+function IconButton({ ariaLabel, onClick, children }: { ariaLabel: string; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       type="button"
@@ -712,5 +585,13 @@ function IconButton({
     >
       {children}
     </button>
+  );
+}
+
+// ─── Turkish bag-of-words for meaning auto-select ────────────────────────────
+
+function trBag(text: string): Set<string> {
+  return new Set(
+    (text.toLowerCase().match(/\p{L}+/gu) ?? []).filter((w) => w.length > 2)
   );
 }

@@ -37,11 +37,17 @@ export function TranslationPopoverHost() {
 
   if (!active || typeof window === 'undefined') return null;
 
-  // Position below the clicked word, clamped to viewport.
   const vw = window.innerWidth;
   const vh = window.innerHeight;
+  const ESTIMATED_H = 320;
   const initialX = Math.max(8, Math.min(active.rect.left, vw - POPOVER_W - 8));
-  const initialY = Math.min(active.rect.bottom + 8, vh - 240);
+  // Prefer above the word (like Radix default). Fall back to below if no room.
+  const spaceAbove = active.rect.top - 8;
+  const spaceBelow = vh - active.rect.bottom - 8;
+  const initialY =
+    spaceAbove >= ESTIMATED_H || spaceAbove >= spaceBelow
+      ? Math.max(8, active.rect.top - ESTIMATED_H)
+      : active.rect.bottom + 8;
 
   return createPortal(
     <>
@@ -55,6 +61,7 @@ export function TranslationPopoverHost() {
         drag
         dragMomentum={false}
         dragElastic={0}
+        dragConstraints={{ left: 8, top: 8, right: vw - POPOVER_W - 8, bottom: vh - 120 }}
         initial={{ x: initialX, y: initialY, opacity: 0, scale: 0.96 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.14, ease: 'easeOut' }}
@@ -462,12 +469,12 @@ function PrimaryMeaning({ meaning, word }: { meaning: WordMeaning; word?: string
     <div className="flex items-start gap-2">
       <Star className="mt-1 h-4 w-4 shrink-0 fill-amber-300 text-amber-400" aria-hidden />
       <div className="min-w-0">
-        <div className="font-serif text-lg font-semibold leading-snug text-foreground">
+        <div className="inline-block rounded-sm bg-amber-50 px-1.5 py-0.5 font-serif text-lg leading-snug text-foreground">
           {tr}
-          {word ? (
-            <span className="ml-2 text-sm font-normal text-muted-foreground">({word})</span>
-          ) : null}
         </div>
+        {word ? (
+          <div className="mt-0.5 text-xs text-muted-foreground">({word})</div>
+        ) : null}
         <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
           &ldquo;{meaning.definitionEn}&rdquo;
         </div>

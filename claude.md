@@ -16,3 +16,10 @@ Help users read difficult English content without breaking reading flow, while i
 - Build MVP only
 - Avoid overengineering
 - Minimize API cost
+
+## Agent Routing (ZORUNLU)
+Her görevde önce `wiki/agents/index.md` routing tablosuna bak → uygun ajanı seç → o .md'yi oku → karakterine bürün → yanıtın başına etiket koy.
+- "düzelt/yaz/fix" → 🛠️ wiki/agents/yazilimci.md
+- "denetle/review/incele" → 🔍 wiki/agents/denetleyici.md
+- "değerlendir/sence/öneri" → 🧭 wiki/agents/degerlendirici.md
+- "ux/kullanıcı/akış" → 👤 wiki/agents/ux-uzmani.md

@@ -172,13 +172,21 @@ export default function ReviewPage() {
       1,
       Math.round((Date.now() - sessionStartedAt.current) / 1000)
     );
-    // Only count main-batch answers toward accuracy. Retry answers are
-    // displayed separately.
     const mainEnd = reReviewStart ?? answers.length;
     const mainAnswers = answers.slice(0, mainEnd);
     const retryAnswers = answers.slice(mainEnd);
     const correct = mainAnswers.filter((a) => a.correct).length;
     const recovered = retryAnswers.filter((a) => a.correct).length;
+    // Unique entries from the main batch for the word summary.
+    const seenIds = new Set<string>();
+    const sessionEntries = challenges
+      .slice(0, mainEnd)
+      .map((c) => c.entry)
+      .filter((e) => {
+        if (seenIds.has(e.id)) return false;
+        seenIds.add(e.id);
+        return true;
+      });
     return (
       <ReviewComplete
         totalSeconds={totalSeconds}
@@ -188,6 +196,7 @@ export default function ReviewPage() {
         retried={retryAnswers.length}
         streak={finalStreakRef.current}
         weekDays={lastSevenDayFlags(settings.reviewLog, todayStr())}
+        sessionEntries={sessionEntries}
       />
     );
   }

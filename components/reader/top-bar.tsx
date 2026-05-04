@@ -16,19 +16,19 @@ type Difficulty = 'easy' | 'medium' | 'hard';
 const DIFFICULTY_LABEL: Record<Difficulty, string> = {
   easy: 'Kolay',
   medium: 'Orta',
-  hard: 'Zorlayıcı',
+  hard: 'Kelime yoğun',
 };
 
 const DIFFICULTY_CLASS: Record<Difficulty, string> = {
   easy: 'border-emerald-300/60 bg-emerald-50 text-emerald-800',
   medium: 'border-amber-300/60 bg-amber-50 text-amber-800',
-  hard: 'border-rose-300/60 bg-rose-50 text-rose-800',
+  hard: 'border-slate-300/60 bg-slate-50 text-slate-700',
 };
 
 const DIFFICULTY_HINT: Record<Difficulty, string> = {
   easy: 'Kısa kelimeler, basit cümleler — akıcı okunur',
   medium: 'B1–B2 seviyesi karışık, bilinmeyen kelimeler olabilir',
-  hard: 'Akademik/uzun kelimeler yoğun — popover sıkça lazım olacak',
+  hard: 'Akademik/uzun kelimeler yoğun — popover hazır, devam et',
 };
 
 /**

@@ -42,12 +42,13 @@ export function TranslationPopoverHost() {
   const ESTIMATED_H = 320;
   const initialX = Math.max(8, Math.min(active.rect.left, vw - POPOVER_W - 8));
   // Prefer above the word (like Radix default). Fall back to below if no room.
+  const rectBottom = active.rect.top + active.rect.height;
   const spaceAbove = active.rect.top - 8;
-  const spaceBelow = vh - active.rect.bottom - 8;
+  const spaceBelow = vh - rectBottom - 8;
   const initialY =
     spaceAbove >= ESTIMATED_H || spaceAbove >= spaceBelow
       ? Math.max(8, active.rect.top - ESTIMATED_H)
-      : active.rect.bottom + 8;
+      : rectBottom + 8;
 
   return createPortal(
     <>
@@ -468,19 +469,35 @@ function DataView({ data, result, selectedIdx, onSelect, saveState, onSave, onSp
 }
 
 function PrimaryMeaning({ meaning }: { meaning: WordMeaning }) {
-  const tr = meaning.definitionTr || meaning.definitionEn;
+  const hasTr = Boolean(meaning.definitionTr?.trim());
   return (
     <div className="flex items-start gap-2">
       <Star className="mt-1 h-4 w-4 shrink-0 fill-amber-300 text-amber-400" aria-hidden />
-      <div className="min-w-0">
-        <div className="font-serif text-lg leading-snug text-foreground">
-          {tr}
+      <div className="min-w-0 space-y-1.5">
+        <div className="flex items-baseline gap-2">
+          <span className="shrink-0 rounded-sm bg-foreground/10 px-1 py-0.5 font-mono text-[9px] font-medium uppercase tracking-wider text-foreground/60">
+            TR
+          </span>
+          {hasTr ? (
+            <span className="font-serif text-lg leading-snug text-foreground">
+              {meaning.definitionTr}
+            </span>
+          ) : (
+            <span className="text-sm italic text-muted-foreground/70">
+              Türkçe karşılığı yüklenemedi
+            </span>
+          )}
         </div>
-        <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          &ldquo;{meaning.definitionEn}&rdquo;
+        <div className="flex items-baseline gap-2">
+          <span className="shrink-0 rounded-sm bg-foreground/10 px-1 py-0.5 font-mono text-[9px] font-medium uppercase tracking-wider text-foreground/60">
+            EN
+          </span>
+          <span className="text-sm leading-relaxed text-muted-foreground">
+            {meaning.definitionEn}
+          </span>
         </div>
         {meaning.example ? (
-          <div className="mt-1 text-xs italic leading-relaxed text-muted-foreground/80">
+          <div className="border-l-2 border-border/60 pl-2 text-xs italic leading-relaxed text-muted-foreground/80">
             {meaning.example}
           </div>
         ) : null}
@@ -490,7 +507,7 @@ function PrimaryMeaning({ meaning }: { meaning: WordMeaning }) {
 }
 
 function AlternateMeaning({ meaning, onClick, shortcut }: { meaning: WordMeaning; onClick: () => void; shortcut?: string }) {
-  const tr = meaning.definitionTr || meaning.definitionEn;
+  const hasTr = Boolean(meaning.definitionTr?.trim());
   return (
     <button
       type="button"
@@ -500,11 +517,13 @@ function AlternateMeaning({ meaning, onClick, shortcut }: { meaning: WordMeaning
       <span className="mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full border border-muted-foreground/40 group-hover:border-foreground" aria-hidden />
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline justify-between gap-2">
-          <span className="truncate text-sm text-foreground">{tr}</span>
+          <span className={cn('truncate text-sm', hasTr ? 'text-foreground' : 'italic text-muted-foreground/70')}>
+            {hasTr ? meaning.definitionTr : 'Türkçe yüklenemedi'}
+          </span>
           <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">{meaning.partOfSpeech}</span>
         </span>
         <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-          &ldquo;{meaning.definitionEn}&rdquo;
+          {meaning.definitionEn}
         </span>
       </span>
       {shortcut ? (
@@ -634,27 +653,53 @@ function SentenceWithHighlight({
   );
 }
 
+// Turkish closed-class words: never useful as stems for highlight matching.
+// Picking "bir" or "şey" as the stem matches any sentence trivially and
+// highlights the wrong word — so filter them out before scoring candidates.
+const TR_STOP_WORDS = new Set([
+  'bir', 'şey', 'olma', 'olmak', 'yapma', 'yapmak', 'etmek', 'etme',
+  'için', 'gibi', 'kadar', 'sonra', 'önce', 'daha', 'çok', 'yok',
+  'var', 'olan', 'olarak', 'veya', 'ya', 'da', 'de', 'ki', 'mi', 'mu',
+  'biri', 'birisi', 'kendi', 'genel', 'özel', 'biraz', 'tüm', 'hep',
+  'bazı', 'her', 'hiç', 'belirli', 'çeşitli', 'birçok', 'durum',
+  'kişi', 'biri', 'şekil', 'şekilde', 'tarz', 'yer', 'zaman',
+]);
+
+interface TrMatch {
+  before: string;
+  match: string;
+  after: string;
+  /** Length of the stem that matched — used to pick the BEST candidate. */
+  score: number;
+}
+
 /**
- * Finds the Turkish word in sentenceTr that best matches the given definitionTr.
- * Uses stem-based matching: takes the first meaningful word from definitionTr
- * and finds which word in sentenceTr starts with that stem (handles Turkish suffixes).
+ * Finds the Turkish word in sentenceTr that best matches definitionTr.
+ *
+ * Strategy:
+ *   - Pull all 4+ char content words from definitionTr (drop Turkish stop words)
+ *   - For each candidate, try progressively shorter stems (min 4 chars)
+ *   - Score by stem length (longer match = stronger evidence)
+ *   - Across all candidates, return the highest-scored match
+ *
+ * The "longest match wins" tiebreaker is what fixes the bug where short
+ * stop-word-ish stems hijacked the highlight for unrelated sentence words.
  */
 function findTrMatchInSentence(
   sentenceTr: string,
   definitionTr: string
-): { before: string; match: string; after: string } | null {
+): TrMatch | null {
   if (!definitionTr || !sentenceTr) return null;
 
-  // Extract candidate stems from definitionTr (words with 4+ chars, longest first)
   const defWords = (definitionTr.toLowerCase().match(/\p{L}+/gu) ?? [])
-    .filter((w) => w.length >= 4)
+    .filter((w) => w.length >= 4 && !TR_STOP_WORDS.has(w))
     .sort((a, b) => b.length - a.length);
   if (defWords.length === 0) return null;
 
   const lowerSentence = sentenceTr.toLowerCase();
+  let best: TrMatch | null = null;
 
   for (const defWord of defWords) {
-    // Try progressively shorter stems (min 4 chars)
     for (let stemLen = defWord.length; stemLen >= 4; stemLen--) {
       const stem = defWord.slice(0, stemLen);
       let pos = 0;
@@ -662,27 +707,35 @@ function findTrMatchInSentence(
         const idx = lowerSentence.indexOf(stem, pos);
         if (idx === -1) break;
 
-        // Stem must start at a word boundary (pos=0 or prev char non-letter)
         const prevChar = idx > 0 ? lowerSentence[idx - 1] : '';
         const isWordStart = !prevChar || !/\p{L}/u.test(prevChar);
 
         if (isWordStart) {
-          // Extend to full Turkish word
           let end = idx + stem.length;
           while (end < sentenceTr.length && /\p{L}/u.test(sentenceTr[end])) {
             end++;
           }
-          return {
+          const candidate: TrMatch = {
             before: sentenceTr.slice(0, idx),
             match: sentenceTr.slice(idx, end),
             after: sentenceTr.slice(end),
+            score: stemLen,
           };
+          if (!best || candidate.score > best.score) {
+            best = candidate;
+          }
+          // Stem matched here — no need to keep walking with this same
+          // stem; longer stems for the same defWord are tried in outer loop.
+          break;
         }
         pos = idx + 1;
       }
+      // First (longest) stem hit for this defWord is enough — break inner
+      // and let outer loop try the next defWord if it can beat the score.
+      if (best && best.score >= stemLen) break;
     }
   }
-  return null;
+  return best;
 }
 
 // ─── Turkish bag-of-words for meaning auto-select ────────────────────────────

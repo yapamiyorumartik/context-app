@@ -284,20 +284,52 @@ export function buildChallenges(
 }
 
 /**
- * Pick the sentence to use for a given entry. Default: original context.
- * With `useExampleSentence: true`, prefer the dictionary `example` when
- * it (a) exists, (b) actually contains the word, and (c) differs from the
- * original context — otherwise fall back so we never sabotage the question.
+ * Pick the sentence to use for a given entry.
+ *
+ * Goal: don't always quiz the user with the SAME sentence they originally
+ * saved the word from — recognition in the original context is shallow
+ * memory ("I remember this paragraph"), not real word knowledge. By the
+ * 2nd–3rd review we should be testing the word in a fresh sentence so
+ * the user has to recover meaning from the word itself.
+ *
+ * Strategy:
+ *   - Build a small pool of usable sentences for this word
+ *     (original context + dictionary example, when valid)
+ *   - Rotate by `reviewCount` so consecutive reviews see different sentences
+ *   - In the retry wave (`useExampleSentence`), strongly prefer the
+ *     example sentence — it's specifically meant to reinforce after a miss
+ *
+ * If only one usable sentence exists, we just return it.
  */
 function sentenceFor(
   entry: VocabularyEntry,
   options: BuildChallengesOptions
 ): string {
-  if (!options.useExampleSentence) return entry.contextSentence;
+  const pool = sentencePool(entry);
+  if (pool.length === 1) return pool[0];
+
+  if (options.useExampleSentence) {
+    // Retry wave: pick the first non-context sentence (i.e. the example).
+    const fresh = pool.find((s) => s !== entry.contextSentence);
+    return fresh ?? pool[0];
+  }
+
+  // Main batch: rotate by reviewCount so reviews 0, 1, 2, ... see
+  // different sentences. New words (reviewCount=0) start with the
+  // original context (familiar foothold), then drift to the example.
+  const idx = entry.reviewCount % pool.length;
+  return pool[idx];
+}
+
+function sentencePool(entry: VocabularyEntry): string[] {
+  const pool: string[] = [entry.contextSentence];
   const example = entry.selectedMeaning.example?.trim();
-  if (!example) return entry.contextSentence;
-  if (example === entry.contextSentence) return entry.contextSentence;
-  const re = new RegExp(`\\b${escapeRegex(entry.word)}\\b`, 'i');
-  if (!re.test(example)) return entry.contextSentence;
-  return example;
+  if (
+    example &&
+    example !== entry.contextSentence &&
+    new RegExp(`\\b${escapeRegex(entry.word)}\\b`, 'i').test(example)
+  ) {
+    pool.push(example);
+  }
+  return pool;
 }

@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 
-import { Article } from '@/components/reader/article';
+import { Article, type SavedLemmaState } from '@/components/reader/article';
 import { EmptyState } from '@/components/reader/empty';
 import { FullTranslation } from '@/components/reader/full-translation';
 import { OnboardingTip } from '@/components/reader/onboarding-tip';
@@ -32,10 +32,24 @@ export default function ReadPage() {
   const addSession = useVocabularyStore((s) => s.addSession);
   const updateSettings = useVocabularyStore((s) => s.updateSettings);
 
+  // Map of lemma → underline state. Words just saved this session don't
+  // have SRS metadata yet, so they're plain "saved". Persisted vocab gets
+  // bumped to "due" / "overdue" based on `nextReviewAt` so the reader
+  // becomes a passive memory cue: "hey, you saved this 4 days ago — read
+  // it in this fresh context to lock it in."
   const savedLemmas = useMemo(() => {
-    const set = new Set<string>(sessionSavedIds);
-    for (const v of vocabulary) set.add(v.lemma);
-    return set;
+    const now = Date.now();
+    const OVERDUE_GRACE_MS = 3 * 24 * 60 * 60 * 1000;
+    const map = new Map<string, SavedLemmaState>();
+
+    for (const id of sessionSavedIds) map.set(id, 'saved');
+    for (const v of vocabulary) {
+      let state: SavedLemmaState = 'saved';
+      if (v.nextReviewAt <= now - OVERDUE_GRACE_MS) state = 'overdue';
+      else if (v.nextReviewAt <= now) state = 'due';
+      map.set(v.lemma, state);
+    }
+    return map;
   }, [sessionSavedIds, vocabulary]);
 
   const handleStart = (raw: string) => {

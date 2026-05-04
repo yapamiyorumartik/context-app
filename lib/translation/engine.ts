@@ -12,6 +12,31 @@ import { translateText } from './mymemory';
 import { guessWordRole } from './pos-heuristic';
 import type { TranslationResult } from './types';
 
+/**
+ * Race MyMemory and Lingva for short translations. MyMemory rate-limits
+ * per IP — once a reading session burns through enough lookups, MyMemory
+ * starts returning null and `definitionTr` ends up empty. Racing Lingva
+ * means Lingva picks up the slack instead of the popover lying with
+ * English text in the Turkish slot.
+ */
+async function translateBest(text: string): Promise<string | null> {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  const myMem = translateText(trimmed).then((r) =>
+    r ? r : Promise.reject(new Error('mymemory_empty'))
+  );
+  const lingva = translateLingva(trimmed).then((r) =>
+    r ? r : Promise.reject(new Error('lingva_empty'))
+  );
+
+  try {
+    return await Promise.any([myMem, lingva]);
+  } catch {
+    return null;
+  }
+}
+
 const VALID_POS: ReadonlySet<PartOfSpeech> = new Set([
   'noun',
   'verb',
@@ -50,9 +75,9 @@ export async function translateWord(
   // 2. Fetch dictionary definitions.
   const dict = await fetchWordDefinition(word);
 
-  // 3. Dictionary missing → fall back to single-word MyMemory translation.
+  // 3. Dictionary missing → fall back to single-word translation race.
   if (!dict) {
-    const tr = await translateText(word);
+    const tr = await translateBest(word);
     return {
       word,
       meanings: tr
@@ -106,12 +131,17 @@ export async function translateWord(
   );
 
   // 6. Translate the chosen subset to Turkish in parallel.
+  //    Use translateBest so a MyMemory rate-limit doesn't sabotage the
+  //    whole popover — Lingva picks up failed entries.
   const translations = await Promise.all(
-    idxToTranslate.map((i) => translateText(allMeanings[i].definitionEn))
+    idxToTranslate.map((i) => translateBest(allMeanings[i].definitionEn))
   );
   idxToTranslate.forEach((i, k) => {
-    allMeanings[i].definitionTr =
-      translations[k] ?? allMeanings[i].definitionEn;
+    // CRITICAL: leave definitionTr as '' on failure rather than copying
+    // English in. Otherwise the popover renders English thinking it's
+    // Turkish — the bug that caused "metnin altlarına inince İngilizce
+    // çıkmaya başlıyor" once cache + rate-limit kicked in mid-article.
+    allMeanings[i].definitionTr = translations[k] ?? '';
   });
 
   // 7. Persist to cache.
@@ -245,7 +275,7 @@ export async function translateSentence(sentence: string): Promise<string> {
     return cached[0].definitionTr;
   }
 
-  const tr = await translateText(trimmed);
+  const tr = await translateBest(trimmed);
   if (!tr) return '';
 
   setCachedTranslation(key, [

@@ -121,6 +121,7 @@ export async function translateWord(
     word,
     meanings: allMeanings,
     primaryMeaningIndex: primaryIdx,
+    phonetic: dict.phonetic,
     source: 'dictionary',
   };
 }

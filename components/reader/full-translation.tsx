@@ -13,6 +13,9 @@ interface FullTranslationProps {
 type Status = 'idle' | 'loading' | 'ready' | 'error';
 
 const CACHE_KEY_PREFIX = 'context.fullTranslation.v1.';
+// Hard ceiling for the client-side fetch. Any longer and the user is
+// staring at a spinner with no useful feedback — better to fail loudly.
+const CLIENT_TIMEOUT_MS = 15_000;
 
 /**
  * Below-the-article panel that fetches a contextual translation of the
@@ -37,6 +40,13 @@ export function FullTranslation({ text }: FullTranslationProps) {
   const fetchTranslation = useCallback(
     async (signal: AbortSignal) => {
       setStatus('loading');
+      const timeoutId = window.setTimeout(() => {
+        if (!signal.aborted) {
+          (signal as AbortSignal & { __timedOut?: boolean }).__timedOut = true;
+          // Trigger abort by calling controller from outside — handled below.
+        }
+      }, CLIENT_TIMEOUT_MS);
+
       try {
         const res = await fetch('/api/translate/text', {
           method: 'POST',
@@ -60,18 +70,19 @@ export function FullTranslation({ text }: FullTranslationProps) {
           try {
             window.sessionStorage.setItem(cacheKey, out);
           } catch {
-            // sessionStorage can be disabled — ignore.
+            /* ignore */
           }
         }
-      } catch (e) {
-        if (e instanceof DOMException && e.name === 'AbortError') return;
+      } catch {
+        if (signal.aborted) return;
         setStatus('error');
+      } finally {
+        window.clearTimeout(timeoutId);
       }
     },
     [text, cacheKey]
   );
 
-  // Auto-load on mount (per text). Restore from sessionStorage if present.
   useEffect(() => {
     if (!text || !cacheKey) return;
     if (startedFor.current === cacheKey) return;
@@ -92,8 +103,15 @@ export function FullTranslation({ text }: FullTranslationProps) {
     }
 
     const controller = new AbortController();
-    fetchTranslation(controller.signal);
-    return () => controller.abort();
+    const timeoutId = window.setTimeout(
+      () => controller.abort(),
+      CLIENT_TIMEOUT_MS
+    );
+    fetchTranslation(controller.signal).catch(() => setStatus('error'));
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
   }, [text, cacheKey, fetchTranslation]);
 
   const handleRetry = () => {
@@ -102,11 +120,12 @@ export function FullTranslation({ text }: FullTranslationProps) {
       try {
         window.sessionStorage.removeItem(cacheKey);
       } catch {
-        // ignore
+        /* ignore */
       }
     }
     const controller = new AbortController();
-    fetchTranslation(controller.signal);
+    window.setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
+    fetchTranslation(controller.signal).catch(() => setStatus('error'));
   };
 
   return (

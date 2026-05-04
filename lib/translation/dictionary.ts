@@ -21,6 +21,9 @@ export interface DictionaryMeaning {
 
 export interface DictionaryResponse {
   word: string;
+  /** IPA transcription, e.g. "/həˈloʊ/". Picked from the first non-empty
+   *  `phonetics[].text` (or the top-level `phonetic` if none of those work). */
+  phonetic?: string;
   meanings: DictionaryMeaning[];
 }
 
@@ -55,9 +58,31 @@ export async function fetchWordDefinition(
 
   const first = data[0];
   if (!first || typeof first !== 'object') return null;
-  const root = first as { word?: unknown; meanings?: unknown };
+  const root = first as {
+    word?: unknown;
+    phonetic?: unknown;
+    phonetics?: unknown;
+    meanings?: unknown;
+  };
   if (typeof root.word !== 'string' || !Array.isArray(root.meanings)) {
     return null;
+  }
+
+  // IPA: prefer the first non-empty `phonetics[].text`, then root `phonetic`.
+  let phonetic: string | undefined;
+  if (Array.isArray(root.phonetics)) {
+    for (const p of root.phonetics) {
+      if (p && typeof p === 'object') {
+        const text = (p as { text?: unknown }).text;
+        if (typeof text === 'string' && text.trim()) {
+          phonetic = text.trim();
+          break;
+        }
+      }
+    }
+  }
+  if (!phonetic && typeof root.phonetic === 'string' && root.phonetic.trim()) {
+    phonetic = root.phonetic.trim();
   }
 
   const meanings: DictionaryMeaning[] = [];
@@ -84,5 +109,5 @@ export async function fetchWordDefinition(
   }
 
   if (meanings.length === 0) return null;
-  return { word: root.word, meanings };
+  return { word: root.word, phonetic, meanings };
 }

@@ -1,15 +1,19 @@
 'use client';
 
-import { motion, useAnimationControls } from 'framer-motion';
-import { Check } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion, useAnimationControls } from 'framer-motion';
+import { Check, Lightbulb, SkipForward, Volume2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { Challenge } from '@/lib/srs';
+import type { Challenge, ChallengeType } from '@/lib/srs';
 import { cn } from '@/lib/utils';
+import type { VocabularyEntry } from '@/types';
 
 interface ChallengeCardProps {
   challenge: Challenge;
+  pool: readonly VocabularyEntry[];
   onAnswer: (result: { correct: boolean; timeMs: number }) => void;
+  onSkip: () => void;
+  enableShake?: boolean;
 }
 
 type OptionState =
@@ -19,16 +23,31 @@ type OptionState =
   | 'reveal-correct'
   | 'disabled';
 
-export function ChallengeCard({ challenge, onAnswer }: ChallengeCardProps) {
+const CORRECT_AUTO_ADVANCE_MS = 1500;
+
+export function ChallengeCard({
+  challenge,
+  pool,
+  onAnswer,
+  onSkip,
+  enableShake = true,
+}: ChallengeCardProps) {
   const [selected, setSelected] = useState<number | null>(null);
+  const [hintOpen, setHintOpen] = useState(false);
   const startedAt = useRef(Date.now());
+  const advanceTimer = useRef<number | null>(null);
   const shake = useAnimationControls();
 
-  // Reset state when the challenge changes (in case a single instance
-  // gets reused — but the page also remounts via key).
   useEffect(() => {
     setSelected(null);
+    setHintOpen(false);
     startedAt.current = Date.now();
+    return () => {
+      if (advanceTimer.current !== null) {
+        window.clearTimeout(advanceTimer.current);
+        advanceTimer.current = null;
+      }
+    };
   }, [challenge.id]);
 
   const handlePick = (i: number) => {
@@ -36,10 +55,11 @@ export function ChallengeCard({ challenge, onAnswer }: ChallengeCardProps) {
     const correct = i === challenge.correctIndex;
     setSelected(i);
     if (correct) {
-      window.setTimeout(() => {
+      advanceTimer.current = window.setTimeout(() => {
+        advanceTimer.current = null;
         onAnswer({ correct: true, timeMs: Date.now() - startedAt.current });
-      }, 400);
-    } else {
+      }, CORRECT_AUTO_ADVANCE_MS);
+    } else if (enableShake) {
       shake.start({
         x: [0, -8, 8, -4, 4, 0],
         transition: { duration: 0.35, ease: 'easeInOut' },
@@ -55,12 +75,63 @@ export function ChallengeCard({ challenge, onAnswer }: ChallengeCardProps) {
     });
   };
 
-  const showAdvance =
-    selected !== null && selected !== challenge.correctIndex;
+  const handleSpeak = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    if (!('speechSynthesis' in window)) return;
+    const u = new SpeechSynthesisUtterance(challenge.entry.word);
+    u.lang = 'en-US';
+    u.rate = 0.9;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  }, [challenge.entry.word]);
+
+  const answered = selected !== null;
+  const wasWrong = answered && selected !== challenge.correctIndex;
+  const example = challenge.entry.selectedMeaning.example?.trim();
+  const enDef = challenge.entry.selectedMeaning.definitionEn?.trim();
+  const showEnDef =
+    answered && enDef && challenge.type !== 'meaning_match';
+
+  const correctOption = challenge.options[challenge.correctIndex];
+  const wrongOption =
+    wasWrong && selected !== null ? challenge.options[selected] : null;
+  const correctInfo = describeCorrect(challenge);
+  const wrongInfo = wrongOption
+    ? lookupOptionMeaning(wrongOption, challenge.type, pool)
+    : null;
+  const hintText = useMemo(() => makeHint(challenge), [challenge]);
 
   return (
     <motion.div animate={shake} className="space-y-5">
-      <ChallengeHeader challenge={challenge} />
+      <ChallengeHeader challenge={challenge} answered={answered} />
+
+      {!answered ? (
+        <div>
+          <button
+            type="button"
+            onClick={() => setHintOpen((v) => !v)}
+            aria-expanded={hintOpen}
+            className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground/70 transition-colors hover:text-foreground"
+          >
+            <Lightbulb className="h-3.5 w-3.5" />
+            {hintOpen ? 'İpucu' : 'İpucu göster'}
+          </button>
+          <AnimatePresence>
+            {hintOpen ? (
+              <motion.p
+                key="hint"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden text-[13px] text-muted-foreground"
+              >
+                <span className="mt-1.5 inline-block">{hintText}</span>
+              </motion.p>
+            ) : null}
+          </AnimatePresence>
+        </div>
+      ) : null}
 
       <ul className="space-y-2">
         {challenge.options.map((opt, i) => {
@@ -77,8 +148,102 @@ export function ChallengeCard({ challenge, onAnswer }: ChallengeCardProps) {
         })}
       </ul>
 
-      {showAdvance ? (
-        <div className="flex justify-end">
+      <AnimatePresence>
+        {wasWrong ? (
+          <motion.div
+            key="learn"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="space-y-2 rounded-md border border-emerald-200/60 bg-emerald-50/40 px-3 py-2.5 text-[13px] leading-relaxed"
+          >
+            <div>
+              <span className="text-[10px] uppercase tracking-wide text-emerald-700/80">
+                Doğrusu
+              </span>
+              <div className="mt-0.5">
+                <span className="font-serif font-medium text-foreground">
+                  {correctInfo.label}
+                </span>
+                {correctInfo.detail ? (
+                  <span className="text-muted-foreground"> — {correctInfo.detail}</span>
+                ) : null}
+              </div>
+            </div>
+            {wrongInfo ? (
+              <div>
+                <span className="text-[10px] uppercase tracking-wide text-rose-700/70">
+                  Senin seçtiğin
+                </span>
+                <div className="mt-0.5">
+                  <span className="font-serif font-medium text-foreground">
+                    {wrongInfo.label}
+                  </span>
+                  {wrongInfo.detail ? (
+                    <span className="text-muted-foreground"> — {wrongInfo.detail}</span>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+          </motion.div>
+        ) : null}
+        {showEnDef ? (
+          <motion.p
+            key="endef"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="text-[12px] leading-relaxed text-muted-foreground/90"
+          >
+            <span className="mr-1.5 text-[10px] uppercase tracking-wide text-muted-foreground/60">
+              EN
+            </span>
+            {enDef}
+          </motion.p>
+        ) : null}
+        {wasWrong && example ? (
+          <motion.p
+            key="example"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="rounded-md border border-border/40 bg-muted/30 px-3 py-2 font-serif text-[14px] italic leading-relaxed text-muted-foreground"
+          >
+            {example}
+          </motion.p>
+        ) : null}
+      </AnimatePresence>
+
+      <div className="flex items-center justify-between gap-3">
+        {!answered ? (
+          <button
+            type="button"
+            onClick={onSkip}
+            className="inline-flex items-center gap-1 text-[12px] text-muted-foreground/70 transition-colors hover:text-muted-foreground"
+            aria-label="Skip this word"
+          >
+            <SkipForward className="h-3.5 w-3.5" /> Skip
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={handleSpeak}
+            className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground/70 transition-colors hover:text-muted-foreground"
+            aria-label="Pronounce word"
+          >
+            <Volume2 className="h-3.5 w-3.5" />
+            {challenge.entry.phonetic ? (
+              <span className="font-mono text-[11px]">
+                {challenge.entry.phonetic}
+              </span>
+            ) : null}
+          </button>
+        )}
+
+        {wasWrong ? (
           <button
             type="button"
             onClick={handleAdvance}
@@ -86,8 +251,8 @@ export function ChallengeCard({ challenge, onAnswer }: ChallengeCardProps) {
           >
             <Check className="h-4 w-4" /> Got it
           </button>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </motion.div>
   );
 }
@@ -105,9 +270,92 @@ function optionState(
   return 'disabled';
 }
 
-// ─── Sub-views ──────────────────────────────────────────────────────────────
+interface OptionInfo {
+  label: string;
+  detail?: string;
+}
 
-function ChallengeHeader({ challenge }: { challenge: Challenge }) {
+function describeCorrect(challenge: Challenge): OptionInfo {
+  const meaningTr =
+    challenge.entry.selectedMeaning.definitionTr ||
+    challenge.entry.selectedMeaning.definitionEn;
+  switch (challenge.type) {
+    case 'meaning_match':
+      return { label: meaningTr };
+    case 'fill_blank':
+    case 'reverse_recall':
+      return { label: challenge.entry.word, detail: meaningTr };
+  }
+}
+
+function lookupOptionMeaning(
+  text: string,
+  type: ChallengeType,
+  pool: readonly VocabularyEntry[]
+): OptionInfo | null {
+  if (type === 'meaning_match') {
+    const entry = pool.find(
+      (v) =>
+        (v.selectedMeaning.definitionTr ||
+          v.selectedMeaning.definitionEn) === text
+    );
+    if (!entry) return { label: text };
+    return { label: text, detail: `(${entry.word})` };
+  }
+  const lower = text.toLowerCase();
+  const entry = pool.find((v) => v.lemma === lower);
+  if (!entry) return { label: text };
+  return {
+    label: text,
+    detail:
+      entry.selectedMeaning.definitionTr ||
+      entry.selectedMeaning.definitionEn,
+  };
+}
+
+function makeHint(challenge: Challenge): string {
+  const pos = challenge.entry.selectedMeaning.partOfSpeech;
+  const posTr = posToTr(pos);
+  switch (challenge.type) {
+    case 'meaning_match':
+      return `Bu kullanımda kelime ${posTr}.`;
+    case 'fill_blank': {
+      const w = challenge.word;
+      const initial = w.charAt(0);
+      return `${posTr.charAt(0).toUpperCase() + posTr.slice(1)}, ${w.length} harf, "${initial}…" ile başlıyor.`;
+    }
+    case 'reverse_recall': {
+      const w = challenge.entry.word;
+      const initial = w.charAt(0);
+      return `${posTr.charAt(0).toUpperCase() + posTr.slice(1)}, ${w.length} harf, "${initial}…" ile başlıyor.`;
+    }
+  }
+}
+
+function posToTr(pos: string): string {
+  switch (pos) {
+    case 'noun':
+      return 'isim';
+    case 'verb':
+      return 'fiil';
+    case 'adjective':
+      return 'sıfat';
+    case 'adverb':
+      return 'zarf';
+    case 'phrase':
+      return 'kalıp ifade';
+    default:
+      return 'kelime';
+  }
+}
+
+function ChallengeHeader({
+  challenge,
+  answered,
+}: {
+  challenge: Challenge;
+  answered: boolean;
+}) {
   switch (challenge.type) {
     case 'meaning_match':
       return (
@@ -122,7 +370,17 @@ function ChallengeHeader({ challenge }: { challenge: Challenge }) {
       return (
         <div className="space-y-3">
           <Question>Fill the blank:</Question>
-          <Sentence text={challenge.sentenceWithBlank} highlight="____" />
+          {answered ? (
+            <Sentence
+              text={challenge.sentenceWithBlank.replace(/____/, challenge.word)}
+              highlight={challenge.word}
+            />
+          ) : (
+            <Sentence
+              text={challenge.sentenceWithBlank}
+              highlight="____"
+            />
+          )}
         </div>
       );
     case 'reverse_recall':
@@ -136,6 +394,25 @@ function ChallengeHeader({ challenge }: { challenge: Challenge }) {
             <div className="mt-1 text-[11px] uppercase tracking-wide text-muted-foreground">
               {challenge.partOfSpeech}
             </div>
+            <AnimatePresence>
+              {answered ? (
+                <motion.div
+                  key="ctx"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.25, ease: 'easeOut' }}
+                  className="overflow-hidden"
+                >
+                  <div className="mt-3 border-t border-border/40 pt-3">
+                    <Sentence
+                      text={challenge.contextSentence}
+                      highlight={challenge.entry.word}
+                    />
+                  </div>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
           </div>
         </div>
       );

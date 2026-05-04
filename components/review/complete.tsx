@@ -11,14 +11,25 @@ interface ReviewCompleteProps {
   totalSeconds: number;
   reviewed: number;
   correct: number;
+  /** Number of retry-wave correct answers (out of `retried`). */
+  recovered?: number;
+  retried?: number;
   streak: number;
+  /**
+   * Last 7 days, oldest → today. `true` = a review was completed that day.
+   * Today is always `true` (we just finished one).
+   */
+  weekDays?: boolean[];
 }
 
 export function ReviewComplete({
   totalSeconds,
   reviewed,
   correct,
+  recovered = 0,
+  retried = 0,
   streak,
+  weekDays,
 }: ReviewCompleteProps) {
   const perfect = reviewed > 0 && correct === reviewed;
   const accuracy = reviewed > 0 ? Math.round((correct / reviewed) * 100) : 0;
@@ -59,6 +70,17 @@ export function ReviewComplete({
         {reviewed} reviewed · {correct} correct ({accuracy}%)
       </motion.p>
 
+      {retried > 0 ? (
+        <motion.p
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.22, ease: 'easeOut' }}
+          className="mt-1 text-sm text-amber-700/80"
+        >
+          Recovered {recovered} of {retried} on retry
+        </motion.p>
+      ) : null}
+
       {streak > 0 ? (
         <motion.p
           initial={{ opacity: 0, y: 6 }}
@@ -68,6 +90,27 @@ export function ReviewComplete({
         >
           Streak: {streak} day{streak === 1 ? '' : 's'} 🔥
         </motion.p>
+      ) : null}
+
+      {weekDays && weekDays.length === 7 ? (
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.28, ease: 'easeOut' }}
+          className="mt-4 flex items-center gap-1.5"
+          aria-label="Last 7 days"
+        >
+          {weekDays.map((on, i) => (
+            <span
+              key={i}
+              className={cn(
+                'inline-block h-2 w-2 rounded-full',
+                on ? 'bg-foreground' : 'bg-muted-foreground/25'
+              )}
+              aria-hidden="true"
+            />
+          ))}
+        </motion.div>
       ) : null}
 
       <motion.div

@@ -6,8 +6,9 @@
  * paragraphs preserves cross-sentence context the way DeepL does — the
  * translator sees pronoun antecedents, idioms, etc.
  *
- * Public instances go up and down. We try a small list in order and
- * give up on the request after the first success or a global timeout.
+ * Instances go up and down. We hit them ALL in parallel and take the
+ * first usable response (`Promise.any`). One slow instance can no longer
+ * stall the whole pipeline — the worst case is the global timeout below.
  *
  * No API key. Cost: $0.
  */
@@ -18,7 +19,9 @@ const INSTANCES: ReadonlyArray<string> = [
   'https://translate.plausibility.cloud',
 ];
 
-const PER_REQUEST_TIMEOUT_MS = 7000;
+// Per-instance timeout. Kept tight so the engine can fall back to
+// MyMemory quickly when Lingva is having a bad day.
+const PER_REQUEST_TIMEOUT_MS = 5000;
 
 export async function translateLingva(
   text: string,
@@ -28,35 +31,36 @@ export async function translateLingva(
   const trimmed = text.trim();
   if (!trimmed) return null;
 
-  for (const base of INSTANCES) {
-    const url =
-      `${base}/api/v1/${encodeURIComponent(from)}/` +
-      `${encodeURIComponent(to)}/${encodeURIComponent(trimmed)}`;
+  const attempts = INSTANCES.map((base) => fetchOne(base, trimmed, from, to));
 
-    let res: Response;
-    try {
-      res = await fetch(url, {
-        signal: AbortSignal.timeout(PER_REQUEST_TIMEOUT_MS),
-        headers: { Accept: 'application/json' },
-      });
-    } catch {
-      continue;
-    }
-    if (!res.ok) continue;
-
-    let data: unknown;
-    try {
-      data = await res.json();
-    } catch {
-      continue;
-    }
-    if (!data || typeof data !== 'object') continue;
-
-    const out = (data as { translation?: unknown }).translation;
-    if (typeof out !== 'string') continue;
-    const cleaned = out.trim();
-    if (cleaned.length > 0) return cleaned;
+  try {
+    return await Promise.any(attempts);
+  } catch {
+    // All instances failed (Promise.any throws AggregateError).
+    return null;
   }
+}
 
-  return null;
+async function fetchOne(
+  base: string,
+  text: string,
+  from: string,
+  to: string
+): Promise<string> {
+  const url =
+    `${base}/api/v1/${encodeURIComponent(from)}/` +
+    `${encodeURIComponent(to)}/${encodeURIComponent(text)}`;
+
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(PER_REQUEST_TIMEOUT_MS),
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(`status ${res.status}`);
+
+  const data = (await res.json()) as { translation?: unknown };
+  const out = data.translation;
+  if (typeof out !== 'string') throw new Error('no translation field');
+  const cleaned = out.trim();
+  if (cleaned.length === 0) throw new Error('empty translation');
+  return cleaned;
 }

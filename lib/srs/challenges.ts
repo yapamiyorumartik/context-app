@@ -33,6 +33,8 @@ export interface ReverseRecallChallenge extends BaseChallenge {
   type: 'reverse_recall';
   meaning: string;
   partOfSpeech: PartOfSpeech;
+  /** Sentence to reveal *after* the user answers (the word is highlighted). */
+  contextSentence: string;
 }
 
 export type Challenge =
@@ -128,7 +130,8 @@ function pickType(canUseMulti: boolean, used: ChallengeType[]): ChallengeType {
 
 function generateMeaningMatch(
   entry: VocabularyEntry,
-  pool: readonly VocabularyEntry[]
+  pool: readonly VocabularyEntry[],
+  contextSentence: string = entry.contextSentence
 ): MeaningMatchChallenge {
   const correct = meaningOf(entry);
   const seen = new Set<string>([correct.toLowerCase()]);
@@ -154,7 +157,7 @@ function generateMeaningMatch(
     type: 'meaning_match',
     entry,
     word: entry.word,
-    sentence: entry.contextSentence,
+    sentence: contextSentence,
     options,
     correctIndex: options.indexOf(correct),
   };
@@ -162,19 +165,33 @@ function generateMeaningMatch(
 
 function generateFillBlank(
   entry: VocabularyEntry,
-  pool: readonly VocabularyEntry[]
+  pool: readonly VocabularyEntry[],
+  contextSentence: string = entry.contextSentence
 ): FillBlankChallenge {
   const re = new RegExp(`\\b${escapeRegex(entry.word)}\\b`, 'i');
-  const sentenceWithBlank = re.test(entry.contextSentence)
-    ? entry.contextSentence.replace(re, '____')
-    : `${entry.contextSentence} (____)`;
+  const sentenceWithBlank = re.test(contextSentence)
+    ? contextSentence.replace(re, '____')
+    : `${contextSentence} (____)`;
 
   const correct = entry.word;
+  const targetPos = entry.selectedMeaning.partOfSpeech;
   const seen = new Set<string>([correct.toLowerCase()]);
-  const otherWords = shuffle(
-    pool.filter((v) => v.id !== entry.id).map((v) => v.word)
+
+  // Prefer same-POS distractors so the question actually tests meaning,
+  // not part-of-speech. Fall back to other-POS only if same-POS pool is thin.
+  const samePos = pool.filter(
+    (v) => v.id !== entry.id && v.selectedMeaning.partOfSpeech === targetPos
   );
-  const distractors = takeUnique(otherWords, 3, seen, (s) => s.toLowerCase());
+  const otherPos = pool.filter(
+    (v) => v.id !== entry.id && v.selectedMeaning.partOfSpeech !== targetPos
+  );
+  const ranked = [...shuffle(samePos), ...shuffle(otherPos)];
+  const distractors = takeUnique(
+    ranked.map((v) => v.word),
+    3,
+    seen,
+    (s) => s.toLowerCase()
+  );
 
   const options = shuffle([correct, ...distractors]);
   return {
@@ -190,7 +207,8 @@ function generateFillBlank(
 
 function generateReverseRecall(
   entry: VocabularyEntry,
-  pool: readonly VocabularyEntry[]
+  pool: readonly VocabularyEntry[],
+  contextSentence: string = entry.contextSentence
 ): ReverseRecallChallenge {
   const correct = entry.word;
   const targetPos = entry.selectedMeaning.partOfSpeech;
@@ -220,6 +238,7 @@ function generateReverseRecall(
     entry,
     meaning: meaningOf(entry),
     partOfSpeech: targetPos,
+    contextSentence,
     options,
     correctIndex: options.indexOf(correct),
   };
@@ -227,27 +246,58 @@ function generateReverseRecall(
 
 // ─── Main entry point ───────────────────────────────────────────────────────
 
+export interface BuildChallengesOptions {
+  /**
+   * If true, use `entry.selectedMeaning.example` as the context sentence
+   * (when available) instead of the original `entry.contextSentence`.
+   * This is how the retry wave reinforces a word: same word, fresh context.
+   * Falls back silently to `contextSentence` when no example is recorded.
+   */
+  useExampleSentence?: boolean;
+}
+
 /**
  * Build a list of challenges (one per batch entry).
  * `pool` is the full vocabulary, used to source distractors.
  */
 export function buildChallenges(
   batch: readonly VocabularyEntry[],
-  pool: readonly VocabularyEntry[]
+  pool: readonly VocabularyEntry[],
+  options: BuildChallengesOptions = {}
 ): Challenge[] {
   const canUseMulti = pool.length >= MULTI_WORD_MIN_POOL;
   const used: ChallengeType[] = [];
 
   return batch.map((entry) => {
+    const ctx = sentenceFor(entry, options);
     const type = pickType(canUseMulti, used);
     used.push(type);
     switch (type) {
       case 'meaning_match':
-        return generateMeaningMatch(entry, pool);
+        return generateMeaningMatch(entry, pool, ctx);
       case 'fill_blank':
-        return generateFillBlank(entry, pool);
+        return generateFillBlank(entry, pool, ctx);
       case 'reverse_recall':
-        return generateReverseRecall(entry, pool);
+        return generateReverseRecall(entry, pool, ctx);
     }
   });
+}
+
+/**
+ * Pick the sentence to use for a given entry. Default: original context.
+ * With `useExampleSentence: true`, prefer the dictionary `example` when
+ * it (a) exists, (b) actually contains the word, and (c) differs from the
+ * original context — otherwise fall back so we never sabotage the question.
+ */
+function sentenceFor(
+  entry: VocabularyEntry,
+  options: BuildChallengesOptions
+): string {
+  if (!options.useExampleSentence) return entry.contextSentence;
+  const example = entry.selectedMeaning.example?.trim();
+  if (!example) return entry.contextSentence;
+  if (example === entry.contextSentence) return entry.contextSentence;
+  const re = new RegExp(`\\b${escapeRegex(entry.word)}\\b`, 'i');
+  if (!re.test(example)) return entry.contextSentence;
+  return example;
 }

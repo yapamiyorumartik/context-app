@@ -422,14 +422,21 @@ function DataView({ data, result, selectedIdx, onSelect, saveState, onSave, onSp
       />
       <div className="my-3 h-px bg-border/60" />
 
-      {sentenceTr && data.mode === 'word' ? (
+      {data.mode === 'word' ? (
         <div className="mb-3 rounded-md bg-muted/40 px-3 py-2">
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Bu cümlede</div>
-          <SentenceWithHighlight
-            sentenceTr={sentenceTr}
-            definitionTr={primary.definitionTr}
-            englishWord={data.word}
-          />
+          {sentenceTr ? (
+            <SentenceWithHighlight
+              sentenceTr={sentenceTr}
+              definitionTr={primary.definitionTr}
+              englishWord={data.word}
+            />
+          ) : (
+            <div className="mt-1.5 space-y-1.5">
+              <div className="h-3 w-full animate-pulse rounded bg-muted-foreground/12" />
+              <div className="h-3 w-4/5 animate-pulse rounded bg-muted-foreground/12" />
+            </div>
+          )}
         </div>
       ) : null}
 
@@ -669,7 +676,10 @@ interface TrMatch {
   before: string;
   match: string;
   after: string;
-  /** Length of the stem that matched — used to pick the BEST candidate. */
+}
+
+/** Internal scoring wrapper — score never leaves findTrMatchInSentence. */
+interface TrCandidate extends TrMatch {
   score: number;
 }
 
@@ -697,7 +707,7 @@ function findTrMatchInSentence(
   if (defWords.length === 0) return null;
 
   const lowerSentence = sentenceTr.toLowerCase();
-  let best: TrMatch | null = null;
+  let best: TrCandidate | null = null;
 
   for (const defWord of defWords) {
     for (let stemLen = defWord.length; stemLen >= 4; stemLen--) {
@@ -715,7 +725,7 @@ function findTrMatchInSentence(
           while (end < sentenceTr.length && /\p{L}/u.test(sentenceTr[end])) {
             end++;
           }
-          const candidate: TrMatch = {
+          const candidate: TrCandidate = {
             before: sentenceTr.slice(0, idx),
             match: sentenceTr.slice(idx, end),
             after: sentenceTr.slice(end),
@@ -724,14 +734,10 @@ function findTrMatchInSentence(
           if (!best || candidate.score > best.score) {
             best = candidate;
           }
-          // Stem matched here — no need to keep walking with this same
-          // stem; longer stems for the same defWord are tried in outer loop.
           break;
         }
         pos = idx + 1;
       }
-      // First (longest) stem hit for this defWord is enough — break inner
-      // and let outer loop try the next defWord if it can beat the score.
       if (best && best.score >= stemLen) break;
     }
   }

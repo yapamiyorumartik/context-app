@@ -159,9 +159,9 @@ const SAVED_UNDERLINE_CLASS: Record<SavedLemmaState, string> = {
   saved:
     'underline decoration-dotted decoration-gray-300 underline-offset-4',
   due:
-    'underline decoration-dotted decoration-amber-500/80 underline-offset-4',
+    'underline decoration-dotted decoration-gray-300 underline-offset-4 bg-amber-50/60 rounded-sm',
   overdue:
-    'underline decoration-dotted decoration-rose-500/90 underline-offset-4',
+    'underline decoration-dotted decoration-gray-300 underline-offset-4 bg-rose-50/70 rounded-sm',
 };
 
 const SAVED_LABEL: Record<SavedLemmaState, string> = {
@@ -220,7 +220,10 @@ function TokenSpan({
       onClick={handleClick}
       title={savedState ? SAVED_LABEL[savedState] : undefined}
       className={cn(
-        'cursor-pointer rounded-sm px-px py-0.5 transition-colors hover:bg-slate-200/60',
+        // relative + z-50: sits above the popover backdrop (z-40) so
+        // clicking a new word while a popover is open directly fires
+        // showPopover without the backdrop eating the event first.
+        'relative z-50 cursor-pointer rounded-sm px-px py-0.5 transition-colors hover:bg-slate-200/60',
         savedState && SAVED_UNDERLINE_CLASS[savedState]
       )}
     >

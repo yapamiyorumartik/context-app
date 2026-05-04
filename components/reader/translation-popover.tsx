@@ -476,35 +476,22 @@ function DataView({ data, result, selectedIdx, onSelect, saveState, onSave, onSp
 }
 
 function PrimaryMeaning({ meaning }: { meaning: WordMeaning }) {
-  const hasTr = Boolean(meaning.definitionTr?.trim());
+  const displayTr = meaning.definitionTr?.trim() || meaning.definitionEn;
+  const hasRealTr = Boolean(meaning.definitionTr?.trim());
   return (
     <div className="flex items-start gap-2">
       <Star className="mt-1 h-4 w-4 shrink-0 fill-amber-300 text-amber-400" aria-hidden />
-      <div className="min-w-0 space-y-1.5">
-        <div className="flex items-baseline gap-2">
-          <span className="shrink-0 rounded-sm bg-foreground/10 px-1 py-0.5 font-mono text-[9px] font-medium uppercase tracking-wider text-foreground/60">
-            TR
-          </span>
-          {hasTr ? (
-            <span className="font-serif text-lg leading-snug text-foreground">
-              {meaning.definitionTr}
-            </span>
-          ) : (
-            <span className="text-sm italic text-muted-foreground/70">
-              Türkçe karşılığı yüklenemedi
-            </span>
-          )}
+      <div className="min-w-0">
+        <div className="font-serif text-lg leading-snug text-foreground">
+          {displayTr}
         </div>
-        <div className="flex items-baseline gap-2">
-          <span className="shrink-0 rounded-sm bg-foreground/10 px-1 py-0.5 font-mono text-[9px] font-medium uppercase tracking-wider text-foreground/60">
-            EN
-          </span>
-          <span className="text-sm leading-relaxed text-muted-foreground">
+        {!hasRealTr ? null : (
+          <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
             {meaning.definitionEn}
-          </span>
-        </div>
+          </div>
+        )}
         {meaning.example ? (
-          <div className="border-l-2 border-border/60 pl-2 text-xs italic leading-relaxed text-muted-foreground/80">
+          <div className="mt-1 text-xs italic leading-relaxed text-muted-foreground/80">
             {meaning.example}
           </div>
         ) : null}
@@ -514,7 +501,7 @@ function PrimaryMeaning({ meaning }: { meaning: WordMeaning }) {
 }
 
 function AlternateMeaning({ meaning, onClick, shortcut }: { meaning: WordMeaning; onClick: () => void; shortcut?: string }) {
-  const hasTr = Boolean(meaning.definitionTr?.trim());
+  const displayTr = meaning.definitionTr?.trim() || meaning.definitionEn;
   return (
     <button
       type="button"
@@ -524,14 +511,14 @@ function AlternateMeaning({ meaning, onClick, shortcut }: { meaning: WordMeaning
       <span className="mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full border border-muted-foreground/40 group-hover:border-foreground" aria-hidden />
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline justify-between gap-2">
-          <span className={cn('truncate text-sm', hasTr ? 'text-foreground' : 'italic text-muted-foreground/70')}>
-            {hasTr ? meaning.definitionTr : 'Türkçe yüklenemedi'}
-          </span>
+          <span className="truncate text-sm text-foreground">{displayTr}</span>
           <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">{meaning.partOfSpeech}</span>
         </span>
-        <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-          {meaning.definitionEn}
-        </span>
+        {meaning.definitionTr?.trim() ? (
+          <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+            {meaning.definitionEn}
+          </span>
+        ) : null}
       </span>
       {shortcut ? (
         <kbd className="ml-1 hidden rounded border border-border bg-background px-1 font-mono text-[10px] text-muted-foreground sm:inline-block">

@@ -13,7 +13,7 @@ export function ReviewEmpty({ minWords }: { minWords?: boolean }) {
       </div>
       <h2 className="font-serif text-2xl tracking-tight">
         {minWords
-          ? 'Save at least 3 words before reviewing.'
+          ? 'Save at least 4 words before reviewing.'
           : 'Nothing to review yet.'}
       </h2>
       <p className="mt-2 text-sm text-muted-foreground">

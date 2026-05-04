@@ -23,6 +23,9 @@ export interface VocabularyEntry {
   word: string;
   /** lowercase base, e.g. "address" */
   lemma: string;
+  /** IPA transcription, e.g. "/əˈdrɛs/". Optional — only present for words
+   *  saved after IPA support was added. */
+  phonetic?: string;
   /** the FULL sentence the word came from */
   contextSentence: string;
   /** which meaning the user picked */
@@ -68,4 +71,12 @@ export interface AppSettings {
   /** Date.now() of the most recent successful export. */
   lastExportedAt?: number;
   readingFontSize?: ReadingFontSize;
+  /**
+   * Last ~30 LOCAL day strings (YYYY-MM-DD) on which a review session was
+   * completed. Used to render the 7-day streak grid in the Complete screen.
+   * Sorted ascending; deduped.
+   */
+  reviewLog?: string[];
+  /** Shake animation on wrong answers. Default: true. */
+  enableReviewShake?: boolean;
 }

@@ -3,6 +3,7 @@
 import * as Popover from '@radix-ui/react-popover';
 import {
   Check,
+  ChevronDown,
   Plus,
   RotateCcw,
   Star,
@@ -195,6 +196,7 @@ function PopoverBody({ data, onClose }: PopoverBodyProps) {
       id: crypto.randomUUID(),
       word: data.word,
       lemma: data.word.toLowerCase(),
+      phonetic: result.phonetic,
       contextSentence: data.sentence,
       selectedMeaning: meaning,
       allMeanings: result.meanings,
@@ -322,10 +324,12 @@ function PopoverBody({ data, onClose }: PopoverBodyProps) {
 function PopoverHeader({
   word,
   badge,
+  ipa,
   onClose,
 }: {
   word: string;
   badge?: string;
+  ipa?: string;
   onClose: () => void;
 }) {
   return (
@@ -334,6 +338,11 @@ function PopoverHeader({
         <span className="truncate font-serif text-base font-medium text-foreground">
           {word}
         </span>
+        {ipa ? (
+          <span className="shrink-0 truncate text-[11px] text-muted-foreground/80">
+            {ipa}
+          </span>
+        ) : null}
         {badge ? (
           <span className="shrink-0 rounded-full border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
             {badge}
@@ -424,12 +433,16 @@ function DataView({
   const others = result.meanings
     .map((m, i) => ({ m, i }))
     .filter(({ i }) => i !== selectedIdx);
+  // Collapsed by default — most users only need the context-best meaning.
+  // The toggle is there for the rare case Lesk picked the wrong sense.
+  const [showAlternates, setShowAlternates] = useState(false);
 
   return (
     <div className="flex max-h-[70vh] flex-col">
       <PopoverHeader
         word={data.mode === 'phrase' ? 'Phrase' : data.word}
         badge={primary.partOfSpeech}
+        ipa={data.mode === 'word' ? result.phonetic : undefined}
         onClose={onClose}
       />
       <div className="my-3 h-px bg-border/60" />
@@ -438,21 +451,35 @@ function DataView({
         <PrimaryMeaning meaning={primary} />
 
         {others.length > 0 ? (
-          <div className="mt-4">
-            <div className="mb-2 text-[11px] uppercase tracking-wide text-muted-foreground">
-              Other meanings
-            </div>
-            <ul className="space-y-2">
-              {others.map(({ m, i }) => (
-                <li key={i}>
-                  <AlternateMeaning
-                    meaning={m}
-                    onClick={() => onSelect(i)}
-                    shortcut={i < 4 ? String(i + 1) : undefined}
-                  />
-                </li>
-              ))}
-            </ul>
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={() => setShowAlternates((v) => !v)}
+              className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground/70 transition-colors hover:text-foreground"
+              aria-expanded={showAlternates}
+            >
+              <ChevronDown
+                className={cn(
+                  'h-3 w-3 transition-transform',
+                  showAlternates ? 'rotate-180' : ''
+                )}
+              />
+              {showAlternates ? 'Gizle' : `${others.length} diğer anlam`}
+            </button>
+
+            {showAlternates ? (
+              <ul className="mt-2 space-y-2">
+                {others.map(({ m, i }) => (
+                  <li key={i}>
+                    <AlternateMeaning
+                      meaning={m}
+                      onClick={() => onSelect(i)}
+                      shortcut={i < 4 ? String(i + 1) : undefined}
+                    />
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -552,6 +579,7 @@ function SavedView({
       <PopoverHeader
         word={entry.word}
         badge={entry.selectedMeaning.partOfSpeech}
+        ipa={entry.phonetic}
         onClose={onClose}
       />
       <div className="h-px bg-border/60" />

@@ -6,26 +6,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 
 interface FullTranslationProps {
-  /** The full English text being read. */
   text: string;
 }
 
 type Status = 'idle' | 'loading' | 'ready' | 'error';
 
 const CACHE_KEY_PREFIX = 'context.fullTranslation.v1.';
+const CLIENT_TIMEOUT_MS = 12_000;
 
-/**
- * Below-the-article panel that fetches a contextual translation of the
- * whole reading text (Lingva → MyMemory fallback under the hood).
- *
- * Behaviour:
- *   - Auto-fetches once when the article mounts so the result is ready
- *     by the time the user finishes reading and wants to peek.
- *   - The translated body is rendered blurred at first; clicking the
- *     "Reveal" button (or the panel itself) clears the blur.
- *   - The hash of the source text is the cache key. Re-opening the same
- *     article restores the translation instantly from `sessionStorage`.
- */
 export function FullTranslation({ text }: FullTranslationProps) {
   const [status, setStatus] = useState<Status>('idle');
   const [translation, setTranslation] = useState<string>('');
@@ -34,44 +22,47 @@ export function FullTranslation({ text }: FullTranslationProps) {
 
   const cacheKey = useCacheKey(text);
 
-  const fetchTranslation = useCallback(
-    async (signal: AbortSignal) => {
-      setStatus('loading');
-      try {
-        const res = await fetch('/api/translate/text', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text }),
-          signal,
-        });
-        if (!res.ok) {
-          setStatus('error');
-          return;
-        }
+  const fetchTranslation = useCallback(async () => {
+    setStatus('loading');
+    const controller = new AbortController();
+
+    const fetchPromise = fetch('/api/translate/text', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`status ${res.status}`);
         const data = (await res.json()) as { translation?: string };
         const out = (data.translation ?? '').trim();
-        if (!out) {
-          setStatus('error');
-          return;
-        }
-        setTranslation(out);
-        setStatus('ready');
-        if (cacheKey) {
-          try {
-            window.sessionStorage.setItem(cacheKey, out);
-          } catch {
-            // sessionStorage can be disabled — ignore.
-          }
-        }
-      } catch (e) {
-        if (e instanceof DOMException && e.name === 'AbortError') return;
-        setStatus('error');
-      }
-    },
-    [text, cacheKey]
-  );
+        if (!out) throw new Error('empty translation');
+        return out;
+      });
 
-  // Auto-load on mount (per text). Restore from sessionStorage if present.
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      window.setTimeout(() => {
+        controller.abort();
+        reject(new Error('client_timeout'));
+      }, CLIENT_TIMEOUT_MS);
+    });
+
+    try {
+      const out = await Promise.race([fetchPromise, timeoutPromise]);
+      setTranslation(out);
+      setStatus('ready');
+      if (cacheKey) {
+        try {
+          window.sessionStorage.setItem(cacheKey, out);
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch {
+      setStatus('error');
+    }
+  }, [text, cacheKey]);
+
   useEffect(() => {
     if (!text || !cacheKey) return;
     if (startedFor.current === cacheKey) return;
@@ -91,22 +82,18 @@ export function FullTranslation({ text }: FullTranslationProps) {
       return;
     }
 
-    const controller = new AbortController();
-    fetchTranslation(controller.signal);
-    return () => controller.abort();
+    fetchTranslation();
   }, [text, cacheKey, fetchTranslation]);
 
   const handleRetry = () => {
-    startedFor.current = null;
     if (cacheKey) {
       try {
         window.sessionStorage.removeItem(cacheKey);
       } catch {
-        // ignore
+        /* ignore */
       }
     }
-    const controller = new AbortController();
-    fetchTranslation(controller.signal);
+    fetchTranslation();
   };
 
   return (
@@ -138,8 +125,6 @@ export function FullTranslation({ text }: FullTranslationProps) {
     </section>
   );
 }
-
-// ─── Sub-views ──────────────────────────────────────────────────────────────
 
 function StatusPill({
   status,
@@ -253,12 +238,6 @@ function Body({
   );
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-/**
- * Stable per-text cache key. djb2-style hash so we don't pull in a crypto
- * dependency just for a sessionStorage namespace.
- */
 function useCacheKey(text: string): string | null {
   if (!text) return null;
   let h = 5381;

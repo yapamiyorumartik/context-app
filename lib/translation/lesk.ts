@@ -47,6 +47,14 @@ export function pickBestSense(
     if (score > bestScore) {
       bestScore = score;
       bestIdx = i;
+    } else if (score === bestScore) {
+      // Tiebreak by definition length: shorter = more basic/common meaning.
+      // e.g. "A generally accepted means of exchange" wins over a long
+      // technical economics definition for "money" when context gives no
+      // overlap signal.
+      if (m.definitionEn.length < meanings[bestIdx].definitionEn.length) {
+        bestIdx = i;
+      }
     }
 
     // Track first POS-matched index in case overlap is uniformly zero.

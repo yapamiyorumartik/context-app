@@ -28,6 +28,7 @@ export default function SettingsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentFontSize: ReadingFontSize = settings.readingFontSize ?? 'md';
+  const shakeEnabled = settings.enableReviewShake ?? true;
 
   const handleImportClick = () => fileInputRef.current?.click();
 
@@ -99,6 +100,36 @@ export default function SettingsPage() {
               );
             })}
           </div>
+        </div>
+      </Section>
+
+      <Section title="Review">
+        <div className="flex items-center gap-2">
+          <div className="min-w-0">
+            <div className="text-sm text-foreground">Shake on wrong answer</div>
+            <div className="text-xs text-muted-foreground">
+              Subtle horizontal nudge when you pick the wrong option.
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={shakeEnabled}
+            onClick={() =>
+              updateSettings({ enableReviewShake: !shakeEnabled })
+            }
+            className={cn(
+              'ml-auto inline-flex h-5 w-9 shrink-0 items-center rounded-full border border-border/60 transition-colors',
+              shakeEnabled ? 'bg-foreground' : 'bg-muted'
+            )}
+          >
+            <span
+              className={cn(
+                'inline-block h-4 w-4 transform rounded-full bg-background shadow transition-transform',
+                shakeEnabled ? 'translate-x-4' : 'translate-x-0.5'
+              )}
+            />
+          </button>
         </div>
       </Section>
 

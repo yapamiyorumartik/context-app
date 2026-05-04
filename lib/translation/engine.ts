@@ -121,6 +121,7 @@ export async function translateWord(
     word,
     meanings: allMeanings,
     primaryMeaningIndex: primaryIdx,
+    phonetic: dict.phonetic,
     source: 'dictionary',
   };
 }
@@ -169,14 +170,27 @@ export async function translateLongText(text: string): Promise<string> {
   const trimmed = text.trim();
   if (!trimmed) return '';
 
-  // 1. Lingva first — best quality.
-  const viaLingva = await translateLingva(trimmed);
-  if (viaLingva) return viaLingva;
+  // Race Lingva (whole-text, best quality when up) against MyMemory
+  // chunked (always reliable). Whichever returns a non-empty result
+  // first wins. Lingva instances are publicly hosted scrapers that go
+  // down regularly — racing means Lingva downtime can never stall us.
+  const lingvaAttempt = translateLingva(trimmed).then((r) =>
+    r ? r : Promise.reject(new Error('lingva_empty'))
+  );
 
-  // 2. MyMemory chunked fallback.
-  const chunks = chunkForMyMemory(trimmed, 450);
-  const parts = await Promise.all(chunks.map((c) => translateText(c)));
-  return parts.map((p, i) => p ?? chunks[i]).join('\n\n');
+  const myMemoryAttempt = (async () => {
+    const chunks = chunkForMyMemory(trimmed, 450);
+    const parts = await Promise.all(chunks.map((c) => translateText(c)));
+    const joined = parts.map((p, i) => p ?? chunks[i]).join('\n\n');
+    if (!joined.trim()) throw new Error('mymemory_empty');
+    return joined;
+  })();
+
+  try {
+    return await Promise.any([lingvaAttempt, myMemoryAttempt]);
+  } catch {
+    return '';
+  }
 }
 
 /**

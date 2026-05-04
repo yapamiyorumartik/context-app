@@ -92,7 +92,6 @@ export function ChallengeCard({
   const showEnDef =
     answered && enDef && challenge.type !== 'meaning_match';
 
-  const correctOption = challenge.options[challenge.correctIndex];
   const wrongOption =
     wasWrong && selected !== null ? challenge.options[selected] : null;
   const correctInfo = describeCorrect(challenge);
@@ -106,30 +105,26 @@ export function ChallengeCard({
       <ChallengeHeader challenge={challenge} answered={answered} />
 
       {!answered ? (
-        <div>
+        <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2">
           <button
             type="button"
             onClick={() => setHintOpen((v) => !v)}
             aria-expanded={hintOpen}
-            className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground/70 transition-colors hover:text-foreground"
+            className="inline-flex w-full items-center justify-between gap-2 text-left text-[13px] font-medium text-amber-900"
           >
-            <Lightbulb className="h-3.5 w-3.5" />
-            {hintOpen ? 'İpucu' : 'İpucu göster'}
+            <span className="inline-flex items-center gap-1.5">
+              <Lightbulb className="h-4 w-4 text-amber-600" />
+              {hintOpen ? 'İpucu' : 'İpucu göster'}
+            </span>
+            <span className="text-[11px] text-amber-700/70">
+              {hintOpen ? 'gizle' : 'göster'}
+            </span>
           </button>
-          <AnimatePresence>
-            {hintOpen ? (
-              <motion.p
-                key="hint"
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.2 }}
-                className="overflow-hidden text-[13px] text-muted-foreground"
-              >
-                <span className="mt-1.5 inline-block">{hintText}</span>
-              </motion.p>
-            ) : null}
-          </AnimatePresence>
+          {hintOpen ? (
+            <p className="mt-1.5 text-[13px] leading-relaxed text-amber-900/90">
+              {hintText}
+            </p>
+          ) : null}
         </div>
       ) : null}
 
@@ -148,74 +143,57 @@ export function ChallengeCard({
         })}
       </ul>
 
-      <AnimatePresence>
-        {wasWrong ? (
-          <motion.div
-            key="learn"
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.25, ease: 'easeOut' }}
-            className="space-y-2 rounded-md border border-emerald-200/60 bg-emerald-50/40 px-3 py-2.5 text-[13px] leading-relaxed"
-          >
-            <div>
-              <span className="text-[10px] uppercase tracking-wide text-emerald-700/80">
-                Doğrusu
+      {wasWrong ? (
+        <div className="space-y-3 rounded-md border border-emerald-300 bg-emerald-50 px-4 py-3 text-[14px] leading-relaxed">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+              Doğrusu
+            </div>
+            <div className="mt-1">
+              <span className="font-serif text-base font-semibold text-foreground">
+                {correctInfo.label}
               </span>
-              <div className="mt-0.5">
-                <span className="font-serif font-medium text-foreground">
-                  {correctInfo.label}
+              {correctInfo.detail ? (
+                <span className="text-muted-foreground"> — {correctInfo.detail}</span>
+              ) : null}
+            </div>
+          </div>
+          {wrongInfo ? (
+            <div className="border-t border-emerald-200 pt-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">
+                Senin seçtiğin
+              </div>
+              <div className="mt-1">
+                <span className="font-serif text-base font-semibold text-foreground">
+                  {wrongInfo.label}
                 </span>
-                {correctInfo.detail ? (
-                  <span className="text-muted-foreground"> — {correctInfo.detail}</span>
+                {wrongInfo.detail ? (
+                  <span className="text-muted-foreground"> — {wrongInfo.detail}</span>
                 ) : null}
               </div>
             </div>
-            {wrongInfo ? (
-              <div>
-                <span className="text-[10px] uppercase tracking-wide text-rose-700/70">
-                  Senin seçtiğin
-                </span>
-                <div className="mt-0.5">
-                  <span className="font-serif font-medium text-foreground">
-                    {wrongInfo.label}
-                  </span>
-                  {wrongInfo.detail ? (
-                    <span className="text-muted-foreground"> — {wrongInfo.detail}</span>
-                  ) : null}
-                </div>
+          ) : null}
+          {example ? (
+            <div className="border-t border-emerald-200 pt-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+                Örnek
               </div>
-            ) : null}
-          </motion.div>
-        ) : null}
-        {showEnDef ? (
-          <motion.p
-            key="endef"
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.25, ease: 'easeOut' }}
-            className="text-[12px] leading-relaxed text-muted-foreground/90"
-          >
-            <span className="mr-1.5 text-[10px] uppercase tracking-wide text-muted-foreground/60">
-              EN
-            </span>
-            {enDef}
-          </motion.p>
-        ) : null}
-        {wasWrong && example ? (
-          <motion.p
-            key="example"
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.25, ease: 'easeOut' }}
-            className="rounded-md border border-border/40 bg-muted/30 px-3 py-2 font-serif text-[14px] italic leading-relaxed text-muted-foreground"
-          >
-            {example}
-          </motion.p>
-        ) : null}
-      </AnimatePresence>
+              <p className="mt-1 font-serif text-[14px] italic leading-relaxed text-muted-foreground">
+                {example}
+              </p>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {showEnDef && !wasWrong ? (
+        <p className="text-[12px] leading-relaxed text-muted-foreground/90">
+          <span className="mr-1.5 text-[10px] uppercase tracking-wide text-muted-foreground/60">
+            EN
+          </span>
+          {enDef}
+        </p>
+      ) : null}
 
       <div className="flex items-center justify-between gap-3">
         {!answered ? (

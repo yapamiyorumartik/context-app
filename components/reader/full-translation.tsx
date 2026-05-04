@@ -6,29 +6,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 
 interface FullTranslationProps {
-  /** The full English text being read. */
   text: string;
 }
 
 type Status = 'idle' | 'loading' | 'ready' | 'error';
 
 const CACHE_KEY_PREFIX = 'context.fullTranslation.v1.';
-// Hard ceiling for the client-side fetch. Any longer and the user is
-// staring at a spinner with no useful feedback — better to fail loudly.
-const CLIENT_TIMEOUT_MS = 15_000;
+const CLIENT_TIMEOUT_MS = 12_000;
 
-/**
- * Below-the-article panel that fetches a contextual translation of the
- * whole reading text (Lingva → MyMemory fallback under the hood).
- *
- * Behaviour:
- *   - Auto-fetches once when the article mounts so the result is ready
- *     by the time the user finishes reading and wants to peek.
- *   - The translated body is rendered blurred at first; clicking the
- *     "Reveal" button (or the panel itself) clears the blur.
- *   - The hash of the source text is the cache key. Re-opening the same
- *     article restores the translation instantly from `sessionStorage`.
- */
 export function FullTranslation({ text }: FullTranslationProps) {
   const [status, setStatus] = useState<Status>('idle');
   const [translation, setTranslation] = useState<string>('');
@@ -37,51 +22,46 @@ export function FullTranslation({ text }: FullTranslationProps) {
 
   const cacheKey = useCacheKey(text);
 
-  const fetchTranslation = useCallback(
-    async (signal: AbortSignal) => {
-      setStatus('loading');
-      const timeoutId = window.setTimeout(() => {
-        if (!signal.aborted) {
-          (signal as AbortSignal & { __timedOut?: boolean }).__timedOut = true;
-          // Trigger abort by calling controller from outside — handled below.
-        }
-      }, CLIENT_TIMEOUT_MS);
+  const fetchTranslation = useCallback(async () => {
+    setStatus('loading');
+    const controller = new AbortController();
 
-      try {
-        const res = await fetch('/api/translate/text', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text }),
-          signal,
-        });
-        if (!res.ok) {
-          setStatus('error');
-          return;
-        }
+    const fetchPromise = fetch('/api/translate/text', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`status ${res.status}`);
         const data = (await res.json()) as { translation?: string };
         const out = (data.translation ?? '').trim();
-        if (!out) {
-          setStatus('error');
-          return;
+        if (!out) throw new Error('empty translation');
+        return out;
+      });
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      window.setTimeout(() => {
+        controller.abort();
+        reject(new Error('client_timeout'));
+      }, CLIENT_TIMEOUT_MS);
+    });
+
+    try {
+      const out = await Promise.race([fetchPromise, timeoutPromise]);
+      setTranslation(out);
+      setStatus('ready');
+      if (cacheKey) {
+        try {
+          window.sessionStorage.setItem(cacheKey, out);
+        } catch {
+          /* ignore */
         }
-        setTranslation(out);
-        setStatus('ready');
-        if (cacheKey) {
-          try {
-            window.sessionStorage.setItem(cacheKey, out);
-          } catch {
-            /* ignore */
-          }
-        }
-      } catch {
-        if (signal.aborted) return;
-        setStatus('error');
-      } finally {
-        window.clearTimeout(timeoutId);
       }
-    },
-    [text, cacheKey]
-  );
+    } catch {
+      setStatus('error');
+    }
+  }, [text, cacheKey]);
 
   useEffect(() => {
     if (!text || !cacheKey) return;
@@ -102,20 +82,10 @@ export function FullTranslation({ text }: FullTranslationProps) {
       return;
     }
 
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(
-      () => controller.abort(),
-      CLIENT_TIMEOUT_MS
-    );
-    fetchTranslation(controller.signal).catch(() => setStatus('error'));
-    return () => {
-      window.clearTimeout(timeoutId);
-      controller.abort();
-    };
+    fetchTranslation();
   }, [text, cacheKey, fetchTranslation]);
 
   const handleRetry = () => {
-    startedFor.current = null;
     if (cacheKey) {
       try {
         window.sessionStorage.removeItem(cacheKey);
@@ -123,9 +93,7 @@ export function FullTranslation({ text }: FullTranslationProps) {
         /* ignore */
       }
     }
-    const controller = new AbortController();
-    window.setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
-    fetchTranslation(controller.signal).catch(() => setStatus('error'));
+    fetchTranslation();
   };
 
   return (
@@ -157,8 +125,6 @@ export function FullTranslation({ text }: FullTranslationProps) {
     </section>
   );
 }
-
-// ─── Sub-views ──────────────────────────────────────────────────────────────
 
 function StatusPill({
   status,
@@ -272,12 +238,6 @@ function Body({
   );
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-/**
- * Stable per-text cache key. djb2-style hash so we don't pull in a crypto
- * dependency just for a sessionStorage namespace.
- */
 function useCacheKey(text: string): string | null {
   if (!text) return null;
   let h = 5381;

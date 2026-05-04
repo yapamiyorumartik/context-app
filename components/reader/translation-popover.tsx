@@ -424,11 +424,15 @@ function DataView({ data, result, selectedIdx, onSelect, saveState, onSave, onSp
       {sentenceTr && data.mode === 'word' ? (
         <div className="mb-3 rounded-md bg-muted/40 px-3 py-2">
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Bu cümlede</div>
-          <p className="mt-0.5 text-sm leading-relaxed text-foreground">{sentenceTr}</p>
+          <SentenceWithHighlight
+            sentenceTr={sentenceTr}
+            definitionTr={primary.definitionTr}
+            englishWord={data.word}
+          />
         </div>
       ) : null}
 
-      <PrimaryMeaning meaning={primary} word={data.mode === 'word' ? data.word : undefined} />
+      <PrimaryMeaning meaning={primary} />
 
       {others.length > 0 ? (
         <div className="mt-3">
@@ -463,18 +467,15 @@ function DataView({ data, result, selectedIdx, onSelect, saveState, onSave, onSp
   );
 }
 
-function PrimaryMeaning({ meaning, word }: { meaning: WordMeaning; word?: string }) {
+function PrimaryMeaning({ meaning }: { meaning: WordMeaning }) {
   const tr = meaning.definitionTr || meaning.definitionEn;
   return (
     <div className="flex items-start gap-2">
       <Star className="mt-1 h-4 w-4 shrink-0 fill-amber-300 text-amber-400" aria-hidden />
       <div className="min-w-0">
-        <div className="inline-block rounded-sm bg-amber-50 px-1.5 py-0.5 font-serif text-lg leading-snug text-foreground">
+        <div className="font-serif text-lg leading-snug text-foreground">
           {tr}
         </div>
-        {word ? (
-          <div className="mt-0.5 text-xs text-muted-foreground">({word})</div>
-        ) : null}
         <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
           &ldquo;{meaning.definitionEn}&rdquo;
         </div>
@@ -540,10 +541,14 @@ function SavedView({
       {sentenceTr ? (
         <div className="rounded-md bg-muted/40 px-3 py-2">
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Bu cümlede</div>
-          <p className="mt-0.5 text-sm leading-relaxed text-foreground">{sentenceTr}</p>
+          <SentenceWithHighlight
+            sentenceTr={sentenceTr}
+            definitionTr={entry.selectedMeaning.definitionTr}
+            englishWord={entry.word}
+          />
         </div>
       ) : null}
-      <PrimaryMeaning meaning={entry.selectedMeaning} word={entry.word} />
+      <PrimaryMeaning meaning={entry.selectedMeaning} />
       <div className="text-[11px] text-muted-foreground">Saved {relativeTime(entry.createdAt)}</div>
       <div className="flex items-center justify-between gap-2 border-t border-border/60 pt-3">
         <button
@@ -593,6 +598,91 @@ function IconButton({ ariaLabel, onClick, children }: { ariaLabel: string; onCli
       {children}
     </button>
   );
+}
+
+// ─── "Bu cümlede" sentence with highlighted TR equivalent ────────────────────
+
+function SentenceWithHighlight({
+  sentenceTr,
+  definitionTr,
+  englishWord,
+}: {
+  sentenceTr: string;
+  definitionTr?: string;
+  englishWord: string;
+}) {
+  const match = useMemo(
+    () => (definitionTr ? findTrMatchInSentence(sentenceTr, definitionTr) : null),
+    [sentenceTr, definitionTr]
+  );
+
+  if (!match) {
+    return <p className="mt-0.5 text-sm leading-relaxed text-foreground">{sentenceTr}</p>;
+  }
+
+  return (
+    <div>
+      <p className="mt-0.5 text-sm leading-relaxed text-foreground">
+        <span>{match.before}</span>
+        <span className="rounded-sm bg-amber-200/70 px-0.5 font-medium text-amber-900">
+          {match.match}
+        </span>
+        <span>{match.after}</span>
+      </p>
+      <p className="mt-0.5 text-[11px] text-muted-foreground/60">({englishWord})</p>
+    </div>
+  );
+}
+
+/**
+ * Finds the Turkish word in sentenceTr that best matches the given definitionTr.
+ * Uses stem-based matching: takes the first meaningful word from definitionTr
+ * and finds which word in sentenceTr starts with that stem (handles Turkish suffixes).
+ */
+function findTrMatchInSentence(
+  sentenceTr: string,
+  definitionTr: string
+): { before: string; match: string; after: string } | null {
+  if (!definitionTr || !sentenceTr) return null;
+
+  // Extract candidate stems from definitionTr (words with 4+ chars, longest first)
+  const defWords = (definitionTr.toLowerCase().match(/\p{L}+/gu) ?? [])
+    .filter((w) => w.length >= 4)
+    .sort((a, b) => b.length - a.length);
+  if (defWords.length === 0) return null;
+
+  const lowerSentence = sentenceTr.toLowerCase();
+
+  for (const defWord of defWords) {
+    // Try progressively shorter stems (min 4 chars)
+    for (let stemLen = defWord.length; stemLen >= 4; stemLen--) {
+      const stem = defWord.slice(0, stemLen);
+      let pos = 0;
+      while (pos <= lowerSentence.length - stem.length) {
+        const idx = lowerSentence.indexOf(stem, pos);
+        if (idx === -1) break;
+
+        // Stem must start at a word boundary (pos=0 or prev char non-letter)
+        const prevChar = idx > 0 ? lowerSentence[idx - 1] : '';
+        const isWordStart = !prevChar || !/\p{L}/u.test(prevChar);
+
+        if (isWordStart) {
+          // Extend to full Turkish word
+          let end = idx + stem.length;
+          while (end < sentenceTr.length && /\p{L}/u.test(sentenceTr[end])) {
+            end++;
+          }
+          return {
+            before: sentenceTr.slice(0, idx),
+            match: sentenceTr.slice(idx, end),
+            after: sentenceTr.slice(end),
+          };
+        }
+        pos = idx + 1;
+      }
+    }
+  }
+  return null;
 }
 
 // ─── Turkish bag-of-words for meaning auto-select ────────────────────────────
